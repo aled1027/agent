@@ -1,8 +1,8 @@
 #!/usr/bin/env npx tsx
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { spawn, type ChildProcess } from 'child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 type CliMarker = {
 	pos: [number, number, number];
@@ -10,119 +10,30 @@ type CliMarker = {
 	size?: number;
 };
 
-type CdpResponse = {
-	id: number;
-	result?: unknown;
-	error?: { message?: string };
+type CdpLike = {
+	send: (method: string, params?: Record<string, unknown>, sessionId?: string | null, timeout?: number) => Promise<any>;
+	evaluate: (sessionId: string, expression: string, timeout?: number) => Promise<any>;
+	on: (method: string, handler: (params: any, sessionId: string | null) => void) => () => void;
+	off: (method: string, handler: (params: any, sessionId: string | null) => void) => void;
+	close: () => void;
 };
 
-type CdpEvent = {
-	method: string;
-	params?: Record<string, unknown>;
-	sessionId?: string;
-};
+type ConnectFn = (timeout?: number) => Promise<CdpLike>;
 
-class CdpClient {
-	private ws: WebSocket;
-	private nextId = 1;
-	private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-	private eventHandlers = new Map<string, Array<(event: CdpEvent) => void>>();
-
-	private constructor(ws: WebSocket) {
-		this.ws = ws;
-		this.ws.onmessage = (message) => {
-			if (typeof message.data !== 'string') return;
-			const payload = JSON.parse(message.data) as CdpResponse | CdpEvent;
-
-			if ('id' in payload) {
-				const pending = this.pending.get(payload.id);
-				if (!pending) return;
-				this.pending.delete(payload.id);
-				if (payload.error) {
-					pending.reject(new Error(payload.error.message ?? 'CDP command failed'));
-				} else {
-					pending.resolve(payload.result);
-				}
-				return;
-			}
-
-			const handlers = this.eventHandlers.get(payload.method);
-			if (handlers) {
-				for (const handler of handlers) handler(payload);
-			}
-		};
-		this.ws.onerror = () => {
-			this.rejectAllPending(new Error('Chrome CDP websocket error'));
-		};
-		this.ws.onclose = () => {
-			this.rejectAllPending(new Error('Chrome CDP websocket closed'));
-		};
-	}
-
-	private rejectAllPending(error: Error) {
-		for (const [id, pending] of this.pending.entries()) {
-			this.pending.delete(id);
-			pending.reject(error);
+let cachedConnect: ConnectFn | null = null;
+async function getConnect(): Promise<ConnectFn> {
+	if (cachedConnect) return cachedConnect;
+	try {
+		const mod = (await import('./cdp.js')) as { connect: ConnectFn };
+		cachedConnect = mod.connect;
+		return cachedConnect;
+	} catch (error: any) {
+		if (error?.code === 'ERR_MODULE_NOT_FOUND' && String(error?.message ?? '').includes("package 'ws'")) {
+			throw new Error(
+				"Missing dependency 'ws' for scripts/cdp.js. Run: cd skills/canvas-screenshot/scripts && npm install"
+			);
 		}
-	}
-
-	static async connect(webSocketUrl: string, timeoutMs = 10000): Promise<CdpClient> {
-		return await new Promise((resolve, reject) => {
-			const ws = new WebSocket(webSocketUrl);
-			const timeout = setTimeout(() => {
-				ws.close();
-				reject(new Error('Timed out connecting to Chrome CDP websocket'));
-			}, timeoutMs);
-
-			ws.onopen = () => {
-				clearTimeout(timeout);
-				resolve(new CdpClient(ws));
-			};
-
-			ws.onerror = () => {
-				clearTimeout(timeout);
-				reject(new Error('Failed to connect to Chrome CDP websocket'));
-			};
-		});
-	}
-
-	on(method: string, handler: (event: CdpEvent) => void) {
-		const handlers = this.eventHandlers.get(method) ?? [];
-		handlers.push(handler);
-		this.eventHandlers.set(method, handlers);
-	}
-
-	off(method: string, handler: (event: CdpEvent) => void) {
-		const handlers = this.eventHandlers.get(method);
-		if (!handlers) return;
-		this.eventHandlers.set(
-			method,
-			handlers.filter((h) => h !== handler)
-		);
-	}
-
-	async send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<unknown> {
-		if (this.ws.readyState !== WebSocket.OPEN) {
-			throw new Error('Chrome CDP websocket is not open');
-		}
-
-		const id = this.nextId++;
-		const payload: Record<string, unknown> = { id, method, params };
-		if (sessionId) payload.sessionId = sessionId;
-
-		return await new Promise((resolve, reject) => {
-			this.pending.set(id, { resolve, reject });
-			try {
-				this.ws.send(JSON.stringify(payload));
-			} catch (error) {
-				this.pending.delete(id);
-				reject(error instanceof Error ? error : new Error(String(error)));
-			}
-		});
-	}
-
-	close() {
-		this.ws.close();
+		throw error;
 	}
 }
 
@@ -274,9 +185,7 @@ Core options:
   --route <path>        Route path (default: /demos/agent-loop)
   --selector <css>      Canvas selector (default: .three-container canvas)
   --full-page           Capture full page instead of canvas
-  --cdp-port <number>   Chrome remote-debugging port (default: 9222)
-  --chrome-path <path>  Chrome executable path for auto-launch (optional)
-  --headless            If auto-launch is needed, run Chrome in headless mode
+  --cdp-port <number>   CDP port (must be 9222 with shared scripts)
 
 Camera options (forwarded as query params):
   --angle <preset>      front|back|left|right|top|bottom|iso|iso-back|iso-left|iso-right
@@ -290,14 +199,9 @@ Debug marker options:
                         Example: --marker "0,0,0,#ff0,0.2;1,0,0,#0ff,0.15"
 
 Notes:
-  This script first tries an existing Chrome on the CDP port, then auto-launches one if needed.
-  This assumes the target route reads optional query params: angle, pos, lookAt, zoom, markers.
-  Example:
-    /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
-
-Examples:
-  npx tsx scripts/canvas-screenshot.ts --angle iso --out screenshots/iso.png
-  npx tsx scripts/canvas-screenshot.ts --pos "2,1,2" --look-at "0,0,0" --zoom 1.5
+  This script uses ./start.js + ./cdp.js and expects CDP on localhost:9222.
+  --headless and --chrome-path are ignored by this implementation.
+  The target route must read optional query params: angle, pos, lookAt, zoom, markers.
 `);
 				process.exit(0);
 		}
@@ -306,144 +210,80 @@ Examples:
 	return result;
 }
 
-async function getBrowserWebSocketUrl(cdpPort: number): Promise<string> {
-	const endpoint = `http://127.0.0.1:${cdpPort}/json/version`;
-	const res = await fetch(endpoint);
-	if (!res.ok) throw new Error(`Failed to query ${endpoint} (${res.status})`);
-	const json = (await res.json()) as { webSocketDebuggerUrl?: string };
-	if (!json.webSocketDebuggerUrl) {
-		throw new Error(`No webSocketDebuggerUrl returned from ${endpoint}`);
+function startChromeViaScript() {
+	const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+	const startScript = path.join(scriptDir, 'start.js');
+	const started = spawnSync(process.execPath, [startScript], {
+		encoding: 'utf8'
+	});
+
+	if (started.status !== 0) {
+		const stderr = started.stderr?.trim();
+		const stdout = started.stdout?.trim();
+		throw new Error(
+			`Failed to run start.js${stderr ? `\n${stderr}` : stdout ? `\n${stdout}` : ''}`
+		);
 	}
-	return json.webSocketDebuggerUrl;
 }
 
-function resolveChromeExecutable(chromePath?: string): string {
-	if (chromePath) return chromePath;
-
-	if (process.platform === 'darwin') {
-		const macCandidates = [
-			'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-			'/Applications/Chromium.app/Contents/MacOS/Chromium'
-		];
-		for (const candidate of macCandidates) {
-			if (fs.existsSync(candidate)) return candidate;
-		}
+async function ensureChrome(cdpPort: number) {
+	if (cdpPort !== 9222) {
+		throw new Error('--cdp-port must be 9222 when using shared scripts/cdp.js');
 	}
 
-	if (process.platform === 'win32') {
-		const pf = process.env.ProgramFiles ?? 'C:\\Program Files';
-		const pfx86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
-		const local = process.env.LocalAppData ?? '';
-		const winCandidates = [
-			`${pf}\\Google\\Chrome\\Application\\chrome.exe`,
-			`${pfx86}\\Google\\Chrome\\Application\\chrome.exe`,
-			`${local}\\Google\\Chrome\\Application\\chrome.exe`
-		];
-		for (const candidate of winCandidates) {
-			if (fs.existsSync(candidate)) return candidate;
-		}
+	const connect = await getConnect();
+	try {
+		const cdp = await connect(1500);
+		cdp.close();
+		return;
+	} catch {
+		startChromeViaScript();
 	}
-
-	return process.platform === 'win32' ? 'chrome.exe' : 'google-chrome';
 }
 
-function launchChrome(cdpPort: number, chromePath?: string, headless = false): {
-	process: ChildProcess;
-	userDataDir: string;
-} {
-	const executable = resolveChromeExecutable(chromePath);
-	const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-screenshot-chrome-'));
-	const launchArgs = [
-		`--remote-debugging-port=${cdpPort}`,
-		'--no-first-run',
-		'--no-default-browser-check',
-		`--user-data-dir=${userDataDir}`,
-		'about:blank'
-	];
-	if (headless) {
-		launchArgs.unshift('--headless=new', '--disable-gpu');
-	}
-
-	const chromeProcess = spawn(executable, launchArgs, { stdio: 'ignore' });
-	if (!chromeProcess.pid) {
-		throw new Error(`Failed to launch Chrome executable: ${executable}`);
-	}
-
-	return { process: chromeProcess, userDataDir };
-}
-
-async function waitForBrowserWebSocketUrl(cdpPort: number, timeoutMs = 15000): Promise<string> {
-	const started = Date.now();
-	let lastError: unknown;
-	while (Date.now() - started < timeoutMs) {
-		try {
-			return await getBrowserWebSocketUrl(cdpPort);
-		} catch (error) {
-			lastError = error;
-			await new Promise((resolve) => setTimeout(resolve, 250));
-		}
-	}
-	throw new Error(
-		`Timed out waiting for Chrome CDP endpoint on port ${cdpPort}${
-			lastError ? ` (${String(lastError)})` : ''
-		}`
-	);
-}
-
-async function waitForLoad(client: CdpClient, sessionId: string, timeoutMs = 30000) {
-	const stateResult = (await client.send(
-		'Runtime.evaluate',
-		{
-			expression: 'document.readyState',
-			returnByValue: true
-		},
-		sessionId
-	)) as { result?: { value?: unknown } };
-	if (stateResult?.result?.value === 'complete') return;
+async function waitForLoad(cdp: CdpLike, sessionId: string, timeoutMs = 30000) {
+	const state = await cdp.evaluate(sessionId, 'document.readyState');
+	if (state === 'complete') return;
 
 	await new Promise<void>((resolve, reject) => {
 		const timeout = setTimeout(() => {
-			client.off('Page.loadEventFired', handler);
+			cdp.off('Page.loadEventFired', handler);
 			reject(new Error('Timed out waiting for Page.loadEventFired'));
 		}, timeoutMs);
 
-		const handler = (event: CdpEvent) => {
-			if (event.sessionId !== sessionId) return;
+		const handler = (_params: any, eventSessionId: string | null) => {
+			if (eventSessionId !== sessionId) return;
 			clearTimeout(timeout);
-			client.off('Page.loadEventFired', handler);
+			cdp.off('Page.loadEventFired', handler);
 			resolve();
 		};
 
-		client.on('Page.loadEventFired', handler);
+		cdp.on('Page.loadEventFired', handler);
 	});
 }
 
 async function waitForSelectorRect(
-	client: CdpClient,
+	cdp: CdpLike,
 	sessionId: string,
 	selector: string,
 	timeoutMs = 30000
 ): Promise<{ x: number; y: number; width: number; height: number }> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		const result = (await client.send(
-			'Runtime.evaluate',
-			{
-				expression: `(() => {
-          const el = document.querySelector(${JSON.stringify(selector)});
-          if (!el) return null;
-          const rect = el.getBoundingClientRect();
-          const style = getComputedStyle(el);
-          const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-          if (!visible) return null;
-          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-        })()`,
-				returnByValue: true
-			},
-			sessionId
-		)) as { result?: { value?: unknown } };
+	const started = Date.now();
 
-		const rect = result?.result?.value as { x: number; y: number; width: number; height: number } | null;
+	while (Date.now() - started < timeoutMs) {
+		const rect = (await cdp.evaluate(
+			sessionId,
+			`(() => {
+				const el = document.querySelector(${JSON.stringify(selector)});
+				if (!el) return null;
+				const rect = el.getBoundingClientRect();
+				const style = getComputedStyle(el);
+				const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+				if (!visible) return null;
+				return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+			})()`
+		)) as { x: number; y: number; width: number; height: number } | null;
+
 		if (
 			rect &&
 			Number.isFinite(rect.x) &&
@@ -468,6 +308,12 @@ async function main() {
 	const outputPath = args.out ?? 'screenshots/agent-loop-canvas.png';
 	const cdpPort = args.cdpPort ?? 9222;
 
+	if (args.headless) {
+		console.warn('--headless is ignored (start.js controls Chrome startup).');
+	}
+	if (args.chromePath) {
+		console.warn('--chrome-path is ignored (start.js controls Chrome startup).');
+	}
 
 	const params = new URLSearchParams();
 	if (args.angle) params.set('angle', args.angle);
@@ -476,7 +322,6 @@ async function main() {
 	if (typeof args.zoom === 'number' && Number.isFinite(args.zoom) && args.zoom > 0) {
 		params.set('zoom', String(args.zoom));
 	}
-
 	if (args.inlineMarkers.length > 0) {
 		const encoded = Buffer.from(JSON.stringify(args.inlineMarkers)).toString('base64');
 		params.set('markers', encoded);
@@ -486,59 +331,35 @@ async function main() {
 	const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
 	const url = `http://localhost:${port}${normalizedRoute}${query ? `?${query}` : ''}`;
 
-	let client: CdpClient | null = null;
+	let cdp: CdpLike | null = null;
 	let targetId: string | null = null;
 	let sessionId: string | null = null;
-	let launchedChrome: ChildProcess | null = null;
-	let launchedChromeUserDataDir: string | null = null;
 
 	try {
-		let webSocketUrl: string;
-		let usedExistingChrome = false;
-		try {
-			webSocketUrl = await getBrowserWebSocketUrl(cdpPort);
-			usedExistingChrome = true;
-		} catch {
-			console.log(`No Chrome detected on CDP port ${cdpPort}. Launching Chrome...`);
-			const launched = launchChrome(cdpPort, args.chromePath, args.headless ?? false);
-			launchedChrome = launched.process;
-			launchedChromeUserDataDir = launched.userDataDir;
-			webSocketUrl = await waitForBrowserWebSocketUrl(cdpPort, 15000);
-		}
+		await ensureChrome(cdpPort);
+		const connect = await getConnect();
+		cdp = await connect(5000);
 
-		if (usedExistingChrome && args.headless) {
-			console.warn('--headless ignored because an existing Chrome instance is being used.');
-		}
+		const target = (await cdp.send('Target.createTarget', { url: 'about:blank' })) as { targetId: string };
+		targetId = target.targetId;
 
-		client = await CdpClient.connect(webSocketUrl);
-
-		const targetResult = (await client.send('Target.createTarget', { url: 'about:blank' })) as {
-			targetId: string;
-		};
-		targetId = targetResult.targetId;
-
-		const attachResult = (await client.send('Target.attachToTarget', {
+		const attached = (await cdp.send('Target.attachToTarget', {
 			targetId,
 			flatten: true
 		})) as { sessionId: string };
-		sessionId = attachResult.sessionId;
+		sessionId = attached.sessionId;
 
-		await client.send('Page.enable', {}, sessionId);
-		await client.send('Runtime.enable', {}, sessionId);
-		await client.send(
+		await cdp.send('Page.enable', {}, sessionId);
+		await cdp.send('Runtime.enable', {}, sessionId);
+		await cdp.send(
 			'Emulation.setDeviceMetricsOverride',
-			{
-				width: 1920,
-				height: 1080,
-				deviceScaleFactor: 1,
-				mobile: false
-			},
+			{ width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false },
 			sessionId
 		);
 
 		console.log('Opening:', url);
-		await client.send('Page.navigate', { url }, sessionId);
-		await waitForLoad(client, sessionId, 60000);
+		await cdp.send('Page.navigate', { url }, sessionId, 60000);
+		await waitForLoad(cdp, sessionId, 60000);
 		await new Promise((resolve) => setTimeout(resolve, 1500));
 
 		const outputDir = path.dirname(outputPath);
@@ -548,24 +369,26 @@ async function main() {
 
 		let screenshotData: string;
 		if (args.fullPage) {
-			const layout = (await client.send('Page.getLayoutMetrics', {}, sessionId)) as {
-				contentSize?: { width: number; height: number; x?: number; y?: number };
+			const layout = (await cdp.send('Page.getLayoutMetrics', {}, sessionId)) as {
+				contentSize?: { width: number; height: number };
 			};
 			const contentWidth = Math.max(1, Math.ceil(layout.contentSize?.width ?? 1920));
 			const contentHeight = Math.max(1, Math.ceil(layout.contentSize?.height ?? 1080));
-			const captured = (await client.send(
+
+			const captured = (await cdp.send(
 				'Page.captureScreenshot',
 				{
 					format: 'png',
 					captureBeyondViewport: true,
 					clip: { x: 0, y: 0, width: contentWidth, height: contentHeight, scale: 1 }
 				},
-				sessionId
+				sessionId,
+				30000
 			)) as { data: string };
 			screenshotData = captured.data;
 		} else {
-			const rect = await waitForSelectorRect(client, sessionId, selector, 30000);
-			const captured = (await client.send(
+			const rect = await waitForSelectorRect(cdp, sessionId, selector, 30000);
+			const captured = (await cdp.send(
 				'Page.captureScreenshot',
 				{
 					format: 'png',
@@ -578,53 +401,37 @@ async function main() {
 						scale: 1
 					}
 				},
-				sessionId
+				sessionId,
+				30000
 			)) as { data: string };
 			screenshotData = captured.data;
 		}
 
 		fs.writeFileSync(outputPath, Buffer.from(screenshotData, 'base64'));
 		console.log('Screenshot saved to:', outputPath);
-	} catch (e) {
-		console.error('Capture failed:', e);
-		console.error(
-			`Make sure Chrome can be launched or is running with remote debugging enabled, e.g. --remote-debugging-port=${cdpPort}`
-		);
+	} catch (error) {
+		console.error('Capture failed:', error);
 		process.exit(1);
 	} finally {
-		if (client && targetId) {
+		if (cdp && sessionId) {
 			try {
-				await client.send('Target.closeTarget', { targetId });
+				await cdp.send('Target.detachFromTarget', { sessionId });
 			} catch {
 				// ignore cleanup errors
 			}
 		}
-		if (client && sessionId) {
+		if (cdp && targetId) {
 			try {
-				await client.send('Target.detachFromTarget', { sessionId });
+				await cdp.send('Target.closeTarget', { targetId });
 			} catch {
 				// ignore cleanup errors
 			}
 		}
-		client?.close();
-		if (launchedChrome && !launchedChrome.killed) {
-			try {
-				launchedChrome.kill();
-			} catch {
-				// ignore cleanup errors
-			}
-		}
-		if (launchedChromeUserDataDir) {
-			try {
-				fs.rmSync(launchedChromeUserDataDir, { recursive: true, force: true });
-			} catch {
-				// ignore cleanup errors
-			}
-		}
+		cdp?.close();
 	}
 }
 
-main().catch((e) => {
-	console.error(e);
+main().catch((error) => {
+	console.error(error);
 	process.exit(1);
 });
