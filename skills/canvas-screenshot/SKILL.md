@@ -36,6 +36,12 @@ Notes:
 - Wire `scripts/view-debug.ts` into route lifecycle: instantiate `new ViewDebug(scene, camera, controls?)` at scene setup and dispose on teardown. That is what enables `angle/pos/lookAt/zoom/markers` query-param control.
 - The target route must support the query params mentioned above to control camera/markers.
 
+Agent guidance for framing and spatial placement:
+- Treat camera placement as scene-relative. Before choosing `pos`/`lookAt`, inspect the actual object layout and coordinate system in the target route, then compose the shot from that spatial context.
+- Account for camera optics and material behavior. `fov` materially changes perceived distance/scale, and translucent/non-opaque materials can occlude, wash out, or visually hide geometry behind them depending on blend order and angle.
+- Interpret relative spatial directives in camera space (e.g., “in front of,” “behind,” “next to,” “beside,” “above,” “below,” “left of,” “right of”), not as world-axis shorthand. Resolve placement from the active camera/view direction so the requested relationship is visually true in-frame.
+- Respect object extents, not just pivot points. Use the referenced object’s approximate radius/bounds when positioning “in front of” so the subject is clearly in front of the visible surface, not merely in front of the object origin.
+
 ## Setup prompt (copy/paste)
 Use this prompt when you want the agent to install the view-debug helper into a project and wire it to a Three.js scene:
 
