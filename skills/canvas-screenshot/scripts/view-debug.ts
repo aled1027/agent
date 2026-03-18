@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type CameraPreset =
+type CameraPreset =
 	| 'front'
 	| 'back'
 	| 'left'
@@ -18,13 +18,13 @@ type MarkerInput = {
 	size?: number;
 };
 
-export type DebugMarker = {
+type DebugMarker = {
 	position: THREE.Vector3;
 	color: string;
 	size: number;
 };
 
-export type InitialViewOptions = {
+type InitialViewOptions = {
 	angle?: CameraPreset;
 	pos?: THREE.Vector3;
 	lookAt?: THREE.Vector3;
@@ -32,7 +32,7 @@ export type InitialViewOptions = {
 	markers?: DebugMarker[];
 };
 
-export const CAMERA_PRESETS: Record<CameraPreset, [number, number, number]> = {
+const CAMERA_PRESETS: Record<CameraPreset, [number, number, number]> = {
 	front: [0, 0, 2],
 	back: [0, 0, -2],
 	left: [-2, 0, 0],
@@ -45,7 +45,7 @@ export const CAMERA_PRESETS: Record<CameraPreset, [number, number, number]> = {
 	'iso-right': [2, 2, -2]
 };
 
-export type OrbitLikeControls = {
+type OrbitLikeControls = {
 	target: THREE.Vector3;
 	update: () => void;
 };
@@ -126,7 +126,7 @@ function parseMarkers(input: string | null): DebugMarker[] {
 	return [];
 }
 
-export function getInitialViewOptions(search: string): InitialViewOptions {
+function getInitialViewOptions(search: string): InitialViewOptions {
 	const params = new URLSearchParams(search);
 	const angle = params.get('angle') as CameraPreset | null;
 	const pos = parseVector3(params.get('pos'));
@@ -144,7 +144,7 @@ export function getInitialViewOptions(search: string): InitialViewOptions {
 	};
 }
 
-export function applyViewOptions(
+function applyViewOptions(
 	camera: THREE.PerspectiveCamera,
 	options: InitialViewOptions,
 	controls?: OrbitLikeControls
@@ -176,7 +176,7 @@ export function applyViewOptions(
 	}
 }
 
-export function addDebugMarkers(group: THREE.Group, markers: DebugMarker[]): void {
+function addDebugMarkers(group: THREE.Group, markers: DebugMarker[]): void {
 	for (const marker of markers) {
 		const geometry = new THREE.SphereGeometry(marker.size, 20, 20);
 		const material = new THREE.MeshBasicMaterial({ color: marker.color });
@@ -189,12 +189,12 @@ export function addDebugMarkers(group: THREE.Group, markers: DebugMarker[]): voi
 export class ViewDebug {
 	private markerGroup = new THREE.Group();
 	private readonly scene: THREE.Scene;
-	readonly options: InitialViewOptions;
+	private readonly options: InitialViewOptions;
 
 	constructor(
 		scene: THREE.Scene,
 		camera: THREE.PerspectiveCamera,
-		controls?: OrbitLikeControls,
+		controls?: { target: THREE.Vector3; update: () => void },
 		search: string = window.location.search
 	) {
 		this.scene = scene;
