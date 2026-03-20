@@ -3,6 +3,11 @@
     "mode": "local",
     "rules": [
       {
+        "comment": "Allow safe env example/schema files",
+        "match": { "params.path": "/(^|\\/)(\\.env\\.schema|example\\.env|\\.example\\.env)$/" },
+        "action": "allow"
+      },
+      {
         "comment": "Block dangerous bash commands",
         "match": { "tool": "bash", "params.command": ["/rm\\s+-rf/", "/sudo/", "/shutdown/", "/reboot/"] },
         "action": "deny",
