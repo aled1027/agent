@@ -41,6 +41,45 @@ interface UsageSnapshot {
 	status?: ProviderStatus;
 }
 
+interface PublicModelRegistry {
+	find?: (provider: string, modelId: string) => unknown;
+	getApiKey?: (model: unknown) => Promise<string | undefined>;
+}
+
+function readJsonFile<T>(filePath: string): T | undefined {
+	try {
+		if (!fs.existsSync(filePath)) return undefined;
+		return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+	} catch {
+		return undefined;
+	}
+}
+
+function readPiAuthJson(): Record<string, any> | undefined {
+	return readJsonFile<Record<string, any>>(path.join(os.homedir(), ".pi", "agent", "auth.json"));
+}
+
+async function getProviderApiKey(
+	modelRegistry: PublicModelRegistry | undefined,
+	provider: string,
+	candidateModelIds: string[],
+): Promise<string | undefined> {
+	if (!modelRegistry?.find || !modelRegistry?.getApiKey) return undefined;
+
+	for (const modelId of candidateModelIds) {
+		try {
+			const model = modelRegistry.find(provider, modelId);
+			if (!model) continue;
+			const apiKey = await modelRegistry.getApiKey(model);
+			if (apiKey) return apiKey;
+		} catch {
+			// Try the next candidate.
+		}
+	}
+
+	return undefined;
+}
+
 // ============================================================================
 // Status Polling
 // ============================================================================
@@ -124,15 +163,18 @@ async function fetchGeminiStatus(): Promise<ProviderStatus> {
 // Claude Usage
 // ============================================================================
 
-function loadClaudeToken(): string | undefined {
-	// Try pi's auth.json first (has user:profile scope)
-	const piAuthPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
-	try {
-		if (fs.existsSync(piAuthPath)) {
-			const data = JSON.parse(fs.readFileSync(piAuthPath, "utf-8"));
-			if (data.anthropic?.access) return data.anthropic.access;
-		}
-	} catch {}
+async function loadClaudeToken(modelRegistry?: PublicModelRegistry): Promise<string | undefined> {
+	const publicApiToken = await getProviderApiKey(modelRegistry, "anthropic", [
+		"claude-haiku-4-5",
+		"claude-sonnet-4-5",
+		"claude-opus-4-5",
+	]);
+	if (publicApiToken) return publicApiToken;
+
+	const piAuth = readPiAuthJson();
+	if (typeof piAuth?.anthropic?.access === "string") {
+		return piAuth.anthropic.access;
+	}
 
 	// Fallback to Claude CLI keychain (macOS)
 	try {
@@ -152,8 +194,8 @@ function loadClaudeToken(): string | undefined {
 	return undefined;
 }
 
-async function fetchClaudeUsage(): Promise<UsageSnapshot> {
-	const token = loadClaudeToken();
+async function fetchClaudeUsage(modelRegistry?: PublicModelRegistry): Promise<UsageSnapshot> {
+	const token = await loadClaudeToken(modelRegistry);
 	if (!token) {
 		return { provider: "anthropic", displayName: "Claude", windows: [], error: "No credentials" };
 	}
@@ -212,16 +254,12 @@ async function fetchClaudeUsage(): Promise<UsageSnapshot> {
 // ============================================================================
 
 function loadCopilotRefreshToken(): string | undefined {
-	// The copilot_internal/user endpoint needs the GitHub OAuth token (ghu_*),
-	// NOT the Copilot session token (tid=*). The refresh token IS the GitHub OAuth token.
-	const authPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
-	try {
-		if (fs.existsSync(authPath)) {
-			const data = JSON.parse(fs.readFileSync(authPath, "utf-8"));
-			// Use refresh token (GitHub OAuth token ghu_*) for the usage API
-			if (data["github-copilot"]?.refresh) return data["github-copilot"].refresh;
-		}
-	} catch {}
+	// The copilot_internal/user endpoint needs the GitHub OAuth refresh token (ghu_*),
+	// which pi does not currently expose via the public model registry API.
+	const piAuth = readPiAuthJson();
+	if (typeof piAuth?.["github-copilot"]?.refresh === "string") {
+		return piAuth["github-copilot"].refresh;
+	}
 
 	return undefined;
 }
@@ -318,17 +356,19 @@ async function fetchCopilotUsage(_modelRegistry: any): Promise<UsageSnapshot> {
 // Gemini Usage
 // ============================================================================
 
-async function fetchGeminiUsage(_modelRegistry: any): Promise<UsageSnapshot> {
-	let token: string | undefined;
-	
-	// Read directly from pi's auth.json
-	const piAuthPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
-	try {
-		if (fs.existsSync(piAuthPath)) {
-			const data = JSON.parse(fs.readFileSync(piAuthPath, "utf-8"));
-			token = data["google-gemini-cli"]?.access;
+async function fetchGeminiUsage(modelRegistry?: PublicModelRegistry): Promise<UsageSnapshot> {
+	let token = await getProviderApiKey(modelRegistry, "google-gemini-cli", [
+		"gemini-2.5-pro",
+		"gemini-2.5-flash",
+		"gemini-2.0-flash",
+	]);
+
+	if (!token) {
+		const piAuth = readPiAuthJson();
+		if (typeof piAuth?.["google-gemini-cli"]?.access === "string") {
+			token = piAuth["google-gemini-cli"].access;
 		}
-	} catch {}
+	}
 	
 	// Fallback to ~/.gemini/oauth_creds.json
 	if (!token) {
@@ -406,47 +446,40 @@ type AntigravityAuth = {
 };
 
 function loadAntigravityAuthFromPiAuthJson(): AntigravityAuth | undefined {
-	const piAuthPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
-	try {
-		if (!fs.existsSync(piAuthPath)) return undefined;
-		const data = JSON.parse(fs.readFileSync(piAuthPath, "utf-8"));
+	const data = readPiAuthJson();
+	if (!data) return undefined;
 
-		// Provider is called "google-antigravity" in pi.
-		const cred = data["google-antigravity"] ?? data["antigravity"] ?? data["anti-gravity"];
-		if (!cred) return undefined;
+	// Provider is called "google-antigravity" in pi.
+	const cred = data["google-antigravity"] ?? data["antigravity"] ?? data["anti-gravity"];
+	if (!cred) return undefined;
 
-		const accessToken = typeof cred.access === "string" ? cred.access : undefined;
-		if (!accessToken) return undefined;
+	const accessToken = typeof cred.access === "string" ? cred.access : undefined;
+	if (!accessToken) return undefined;
 
-		return {
-			accessToken,
-			refreshToken: typeof cred.refresh === "string" ? cred.refresh : undefined,
-			expiresAt: typeof cred.expires === "number" ? cred.expires : undefined,
-			projectId: typeof cred.projectId === "string" ? cred.projectId : typeof cred.project_id === "string" ? cred.project_id : undefined,
-		};
-	} catch {
-		return undefined;
-	}
+	return {
+		accessToken,
+		refreshToken: typeof cred.refresh === "string" ? cred.refresh : undefined,
+		expiresAt: typeof cred.expires === "number" ? cred.expires : undefined,
+		projectId: typeof cred.projectId === "string" ? cred.projectId : typeof cred.project_id === "string" ? cred.project_id : undefined,
+	};
 }
 
-async function loadAntigravityAuth(modelRegistry: any): Promise<AntigravityAuth | undefined> {
-	// Prefer model registry auth storage first (may auto-refresh).
-	try {
-		const accessToken = await Promise.resolve(modelRegistry?.authStorage?.getApiKey?.("google-antigravity"));
-		const raw = await Promise.resolve(modelRegistry?.authStorage?.get?.("google-antigravity"));
-
-		const projectId = typeof raw?.projectId === "string" ? raw.projectId : undefined;
-		const refreshToken = typeof raw?.refresh === "string" ? raw.refresh : undefined;
-		const expiresAt = typeof raw?.expires === "number" ? raw.expires : undefined;
-
-		if (typeof accessToken === "string" && accessToken.length > 0) {
-			return { accessToken, projectId, refreshToken, expiresAt };
-		}
-	} catch {}
-
-	// Fallback to pi auth.json
+async function loadAntigravityAuth(modelRegistry?: PublicModelRegistry): Promise<AntigravityAuth | undefined> {
+	const publicApiToken = await getProviderApiKey(modelRegistry, "google-antigravity", [
+		"claude-sonnet-4-5",
+		"gemini-3-pro-high",
+		"gemini-3-flash",
+	]);
 	const fromPi = loadAntigravityAuthFromPiAuthJson();
-	if (fromPi) return fromPi;
+
+	if (publicApiToken || fromPi) {
+		return {
+			accessToken: publicApiToken ?? fromPi?.accessToken ?? "",
+			refreshToken: fromPi?.refreshToken,
+			expiresAt: fromPi?.expiresAt,
+			projectId: fromPi?.projectId,
+		};
+	}
 
 	// Last resort: env var (won't have projectId; request will likely fail)
 	if (process.env.ANTIGRAVITY_API_KEY) {
@@ -600,23 +633,15 @@ async function fetchAntigravityUsage(modelRegistry: any): Promise<UsageSnapshot>
 // Codex (OpenAI) Usage
 // ============================================================================
 
-async function fetchCodexUsage(modelRegistry: any): Promise<UsageSnapshot> {
-	// Try to get token from pi's auth storage first
-	let accessToken: string | undefined;
+async function fetchCodexUsage(modelRegistry?: PublicModelRegistry): Promise<UsageSnapshot> {
+	let accessToken = await getProviderApiKey(modelRegistry, "openai-codex", [
+		"gpt-5.1-codex-mini",
+		"gpt-5-codex",
+		"codex-mini-latest",
+	]);
 	let accountId: string | undefined;
 	
-	try {
-		// Try openai-codex provider first (pi's built-in)
-		accessToken = await modelRegistry?.authStorage?.getApiKey?.("openai-codex");
-		
-		// Get account ID if available from OAuth credentials
-		const cred = modelRegistry?.authStorage?.get?.("openai-codex");
-		if (cred?.type === "oauth") {
-			accountId = (cred as any).accountId;
-		}
-	} catch {}
-	
-	// Fallback to ~/.codex/auth.json if not in pi's auth
+	// Fallback to ~/.codex/auth.json if not available via pi's public model registry API.
 	if (!accessToken) {
 		const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 		const authPath = path.join(codexHome, "auth.json");
@@ -817,19 +842,17 @@ async function fetchKiroUsage(): Promise<UsageSnapshot> {
 // z.ai
 // ============================================================================
 
-async function fetchZaiUsage(): Promise<UsageSnapshot> {
-	// Check for API key in environment or pi auth
+async function fetchZaiUsage(modelRegistry?: PublicModelRegistry): Promise<UsageSnapshot> {
+	// Check for API key in environment, public pi API, or auth file fallback.
 	let apiKey = process.env.Z_AI_API_KEY;
 	
 	if (!apiKey) {
-		// Try pi auth storage
-		try {
-			const authPath = path.join(os.homedir(), ".pi", "agent", "auth.json");
-			if (fs.existsSync(authPath)) {
-				const auth = JSON.parse(fs.readFileSync(authPath, "utf-8"));
-				apiKey = auth["z-ai"]?.access || auth["zai"]?.access;
-			}
-		} catch {}
+		apiKey = await getProviderApiKey(modelRegistry, "z-ai", ["glm-4.5", "glm-4.5-air", "glm-4.5v"]);
+	}
+
+	if (!apiKey) {
+		const auth = readPiAuthJson();
+		apiKey = auth?.["z-ai"]?.access || auth?.zai?.access;
 	}
 
 	if (!apiKey) {
@@ -955,13 +978,13 @@ class UsageComponent {
 
 		// Fetch usage and status in parallel
 		const [claude, copilot, gemini, codex, antigravity, kiro, zai, claudeStatus, copilotStatus, geminiStatus, codexStatus] = await Promise.all([
-			timeout(fetchClaudeUsage(), 6000, { provider: "anthropic", displayName: "Claude", windows: [], error: "Timeout" }),
+			timeout(fetchClaudeUsage(this.modelRegistry), 6000, { provider: "anthropic", displayName: "Claude", windows: [], error: "Timeout" }),
 			timeout(fetchCopilotUsage(this.modelRegistry), 6000, { provider: "copilot", displayName: "Copilot", windows: [], error: "Timeout" }),
 			timeout(fetchGeminiUsage(this.modelRegistry), 6000, { provider: "gemini", displayName: "Gemini", windows: [], error: "Timeout" }),
 			timeout(fetchCodexUsage(this.modelRegistry), 6000, { provider: "codex", displayName: "Codex", windows: [], error: "Timeout" }),
 			timeout(fetchAntigravityUsage(this.modelRegistry), 6000, { provider: "antigravity", displayName: "Antigravity", windows: [], error: "Timeout" }),
 			timeout(fetchKiroUsage(), 6000, { provider: "kiro", displayName: "Kiro", windows: [], error: "Timeout" }),
-			timeout(fetchZaiUsage(), 6000, { provider: "zai", displayName: "z.ai", windows: [], error: "Timeout" }),
+			timeout(fetchZaiUsage(this.modelRegistry), 6000, { provider: "zai", displayName: "z.ai", windows: [], error: "Timeout" }),
 			timeout(fetchProviderStatus("anthropic"), 3000, { indicator: "unknown" as const }),
 			timeout(fetchProviderStatus("copilot"), 3000, { indicator: "unknown" as const }),
 			timeout(fetchGeminiStatus(), 3000, { indicator: "unknown" as const }),
