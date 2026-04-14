@@ -36,11 +36,17 @@ Use this skill to analyze a pickleball video and determine when rallies start an
 - Prefer player body language and reset behavior over exact ball tracking unless necessary.
 - For longer videos, do a very coarse pass first, then refine only likely rally clusters.
 - For near frame-accurate timing, inspect only local boundary windows at higher FPS.
+- Do not assume a continuous block of visible action is a single rally when the sampling is sparse; short rallies separated by brief reset/reposition intervals can be missed at low FPS.
+- If a candidate rally block is shorter than ~25 seconds, contains possible pauses, or the user questions a boundary, immediately resample that local window at higher temporal resolution (typically 8–15 FPS, and higher if needed).
+- In opening sequences and other short early-game segments, be especially careful not to merge adjacent rallies; inspect for explicit between-point transitions such as relaxed posture, ball retrieval, walking, partner communication, or players returning to serve/receive positions.
+- When uncertain whether one block contains multiple rallies, split the window into smaller chunks first, then inspect those chunks at higher FPS rather than refining the whole block uniformly.
 
 ## Recommended precision strategy
 - Rough intervals: sample every 2–5 seconds.
 - Good rally timing: refine candidate windows at 4–10 FPS.
+- For short or ambiguous candidate windows, use 8–15 FPS before finalizing intervals.
 - Near frame-accurate boundaries: inspect only boundary windows at 10–30 FPS.
+- If a coarse pass suggests a single rally longer than expected for the visible exchange pattern, verify it with sub-second sampling before reporting it as one interval.
 
 ## Prompt template
 
