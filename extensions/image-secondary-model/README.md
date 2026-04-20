@@ -5,7 +5,7 @@ Pi extension that keeps your main agent on one model while delegating image anal
 ## What it adds
 
 - Tool: `analyze_with_secondary_vision_model`
-- Command: `/image-model [provider/model|reset]`
+- Command: `/image-model` selector or `/image-model [provider/model|reset]`
 - Command: `/ask-image-model <question>`
 
 ## Default model
@@ -29,6 +29,8 @@ Inside pi:
 /image-model openai-codex/gpt-5.1
 /image-model reset
 ```
+
+`/image-model` now opens a searchable selector with a text cursor above the list, so it behaves more like `/model` and the todo picker. It also supports searchable slash-argument completions and only shows vision models with configured auth.
 
 ## Usage patterns
 

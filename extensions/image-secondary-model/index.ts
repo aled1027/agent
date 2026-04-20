@@ -1,14 +1,21 @@
 import { readFile } from "node:fs/promises";
 import { accessSync, constants } from "node:fs";
 import { extname, resolve } from "node:path";
-import { complete, type ImageContent, type UserMessage } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { completeSimple, type ImageContent, type UserMessage } from "@mariozechner/pi-ai";
+import { DynamicBorder, type ExtensionAPI, type ExtensionContext, type Theme, type SessionEntry } from "@mariozechner/pi-coding-agent";
+import {
+	Container,
+	type Focusable,
+	fuzzyMatch,
+	getKeybindings,
+	Input,
+	Text,
+	type TUI,
+} from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 const DEFAULT_IMAGE_MODEL = process.env.PI_IMAGE_MODEL?.trim() || "openai-codex/gpt-5.1";
 const CONFIG_ENTRY_TYPE = "image-secondary-model-config";
-const STATUS_KEY = "image-secondary-model";
 
 const MIME_TYPES: Record<string, string> = {
 	".jpg": "image/jpeg",
@@ -25,6 +32,7 @@ interface ConfigState {
 
 interface AnalyzeDetails {
 	model: string;
+	question: string;
 	imageCount: number;
 	sources: string[];
 	stopReason?: string;
@@ -36,6 +44,12 @@ interface AnalyzeDetails {
 		totalTokens: number;
 		costTotal: number;
 	};
+}
+
+function truncateSingleLine(text: string, maxLength = 120): string {
+	const singleLine = text.replace(/\s+/g, " ").trim();
+	if (singleLine.length <= maxLength) return singleLine;
+	return `${singleLine.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
 function parseModelSpec(spec: string): { provider: string; id: string } {
@@ -65,8 +79,8 @@ function getConfiguredModelSpec(ctx: ExtensionContext): string {
 	return getSavedModelSpec(ctx) ?? DEFAULT_IMAGE_MODEL;
 }
 
-function updateStatus(ctx: ExtensionContext) {
-	ctx.ui.setStatus(STATUS_KEY, `vision:${getConfiguredModelSpec(ctx)}`);
+function clearStatus(ctx: ExtensionContext) {
+	ctx.ui.setStatus("image-secondary-model", undefined);
 }
 
 function normalizePath(input: string): string {
@@ -118,6 +132,158 @@ function getMostRecentAttachedImages(ctx: ExtensionContext): { images: ImageCont
 	return undefined;
 }
 
+interface ImageModelItem {
+	value: string;
+	label: string;
+	description?: string;
+	searchText: string;
+}
+
+function filterImageModelItems(items: ImageModelItem[], query: string): ImageModelItem[] {
+	const trimmed = query.trim();
+	if (!trimmed) return items;
+	const tokens = trimmed
+		.split(/\s+/)
+		.map((token) => token.trim())
+		.filter(Boolean);
+	if (tokens.length === 0) return items;
+
+	return items
+		.map((item) => {
+			let score = 0;
+			for (const token of tokens) {
+				const result = fuzzyMatch(token, item.searchText);
+				if (!result.matches) return null;
+				score += result.score;
+			}
+			return { item, score };
+		})
+		.filter((entry): entry is { item: ImageModelItem; score: number } => Boolean(entry))
+		.sort((a, b) => a.score - b.score)
+		.map((entry) => entry.item);
+}
+
+class ImageModelSelectorComponent extends Container implements Focusable {
+	private searchInput: Input;
+	private listContainer: Container;
+	private allItems: ImageModelItem[];
+	private filteredItems: ImageModelItem[];
+	private selectedIndex = 0;
+	private headerText: Text;
+	private hintText: Text;
+	private _focused = false;
+
+	get focused(): boolean {
+		return this._focused;
+	}
+
+	set focused(value: boolean) {
+		this._focused = value;
+		this.searchInput.focused = value;
+	}
+
+	constructor(
+		private tui: TUI,
+		private theme: Theme,
+		items: ImageModelItem[],
+		private currentModelSpec: string,
+		private onSelectCallback: (value: string) => void,
+		private onCancelCallback: () => void,
+	) {
+		super();
+		this.allItems = items;
+		this.filteredItems = items;
+
+		this.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
+		this.headerText = new Text("", 1, 0);
+		this.addChild(this.headerText);
+		this.searchInput = new Input();
+		this.searchInput.onSubmit = () => {
+			const selected = this.filteredItems[this.selectedIndex];
+			if (selected) this.onSelectCallback(selected.value);
+		};
+		this.addChild(this.searchInput);
+		this.listContainer = new Container();
+		this.addChild(this.listContainer);
+		this.hintText = new Text("", 1, 0);
+		this.addChild(this.hintText);
+		this.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
+
+		this.updateHeader();
+		this.hintText.setText(theme.fg("dim", "Type to search • ↑↓ select • Enter choose • Esc cancel"));
+		this.applyFilter("");
+	}
+
+	private updateHeader() {
+		this.headerText.setText(
+			this.theme.fg("accent", this.theme.bold("Vision Model")) +
+				this.theme.fg("muted", `  current: ${this.currentModelSpec}`),
+		);
+	}
+
+	private applyFilter(query: string) {
+		this.filteredItems = filterImageModelItems(this.allItems, query);
+		this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.filteredItems.length - 1));
+		this.updateList();
+	}
+
+	private updateList() {
+		this.listContainer.clear();
+		if (this.filteredItems.length === 0) {
+			this.listContainer.addChild(new Text(this.theme.fg("muted", "  No matching vision models"), 0, 0));
+			return;
+		}
+		const maxVisible = 10;
+		const startIndex = Math.max(
+			0,
+			Math.min(this.selectedIndex - Math.floor(maxVisible / 2), this.filteredItems.length - maxVisible),
+		);
+		const endIndex = Math.min(startIndex + maxVisible, this.filteredItems.length);
+		for (let i = startIndex; i < endIndex; i += 1) {
+			const item = this.filteredItems[i];
+			const isSelected = i === this.selectedIndex;
+			const prefix = isSelected ? this.theme.fg("accent", "→ ") : "  ";
+			const label = isSelected ? this.theme.fg("accent", item.label) : this.theme.fg("text", item.label);
+			const description = item.description ? this.theme.fg("muted", ` — ${item.description}`) : "";
+			this.listContainer.addChild(new Text(prefix + label + description, 0, 0));
+		}
+	}
+
+	handleInput(keyData: string): void {
+		const kb = getKeybindings();
+		if (kb.matches(keyData, "tui.select.up")) {
+			if (this.filteredItems.length === 0) return;
+			this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
+			this.updateList();
+			return;
+		}
+		if (kb.matches(keyData, "tui.select.down")) {
+			if (this.filteredItems.length === 0) return;
+			this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+			this.updateList();
+			return;
+		}
+		if (kb.matches(keyData, "tui.select.confirm")) {
+			const selected = this.filteredItems[this.selectedIndex];
+			if (selected) this.onSelectCallback(selected.value);
+			return;
+		}
+		if (kb.matches(keyData, "tui.select.cancel")) {
+			this.onCancelCallback();
+			return;
+		}
+		this.searchInput.handleInput(keyData);
+		this.applyFilter(this.searchInput.getValue());
+		this.tui.requestRender();
+	}
+
+	override invalidate(): void {
+		super.invalidate();
+		this.updateHeader();
+		this.updateList();
+	}
+}
+
 async function runImageAnalysis(
 	ctx: ExtensionContext,
 	question: string,
@@ -161,6 +327,7 @@ async function runImageAnalysis(
 
 	const detailsBase: AnalyzeDetails = {
 		model: modelSpec,
+		question: question.trim(),
 		imageCount: images.length,
 		sources,
 	};
@@ -188,14 +355,19 @@ async function runImageAnalysis(
 		timestamp: Date.now(),
 	};
 
-	const response = await complete(
+	const response = await completeSimple(
 		model,
 		{
 			systemPrompt:
 				"You are an expert image-analysis assistant used as a secondary model inside a coding harness. Focus on visual evidence, mention uncertainty when needed, and do not invent details.",
 			messages: [userMessage],
 		},
-		{ apiKey: auth.apiKey, headers: auth.headers, signal: ctx.signal },
+		{
+			apiKey: auth.apiKey,
+			headers: auth.headers,
+			signal: ctx.signal,
+			...(model.reasoning ? { reasoning: "minimal" as const } : {}),
+		},
 	);
 
 	if (response.stopReason === "aborted") throw new Error("Image analysis aborted.");
@@ -227,19 +399,98 @@ async function runImageAnalysis(
 }
 
 export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
+	let latestCtx: ExtensionContext | undefined;
+
+	function setConfiguredModelSpec(modelSpec: string, ctx: ExtensionContext, mode: "set" | "reset" = "set") {
+		pi.appendEntry<ConfigState>(CONFIG_ENTRY_TYPE, { modelSpec });
+		clearStatus(ctx);
+		ctx.ui.notify(
+			mode === "reset" ? `Secondary vision model reset to ${modelSpec}` : `Secondary vision model set to ${modelSpec}`,
+			"info",
+		);
+	}
+
+	function getImageModelCompletions(ctx: ExtensionContext): ImageModelItem[] {
+		const currentModelSpec = getConfiguredModelSpec(ctx);
+		const items: ImageModelItem[] = [
+			{
+				value: "reset",
+				label: "reset",
+				description: `Reset to default (${DEFAULT_IMAGE_MODEL})`,
+				searchText: `reset default ${DEFAULT_IMAGE_MODEL}`.toLowerCase(),
+			},
+		];
+		const seen = new Set<string>();
+		for (const model of ctx.modelRegistry.getAll()) {
+			if (!model.input.includes("image")) continue;
+			if (!ctx.modelRegistry.hasConfiguredAuth(model)) continue;
+			const modelSpec = `${model.provider}/${model.id}`;
+			if (seen.has(modelSpec)) continue;
+			seen.add(modelSpec);
+			const tags: string[] = [];
+			if (modelSpec === currentModelSpec) tags.push("current");
+			if (modelSpec === DEFAULT_IMAGE_MODEL) tags.push("default");
+			tags.push("ready");
+			const description = tags.join(" • ");
+			items.push({
+				value: modelSpec,
+				label: modelSpec,
+				description,
+				searchText: `${modelSpec} ${model.id} ${model.provider} ${description}`.toLowerCase(),
+			});
+		}
+		return items;
+	}
+
+	async function showImageModelSelector(ctx: ExtensionContext) {
+		const currentModelSpec = getConfiguredModelSpec(ctx);
+		const items = getImageModelCompletions(ctx).map((item) => {
+			if (item.value === "reset") {
+				return {
+					...item,
+					value: DEFAULT_IMAGE_MODEL,
+					label:
+						DEFAULT_IMAGE_MODEL === currentModelSpec
+							? `${DEFAULT_IMAGE_MODEL} (default, current)`
+							: `${DEFAULT_IMAGE_MODEL} (default)`,
+					searchText: `${item.searchText} ${currentModelSpec === DEFAULT_IMAGE_MODEL ? "current" : "default"}`,
+				};
+			}
+			return item;
+		});
+
+		const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) =>
+			new ImageModelSelectorComponent(tui, theme, items, currentModelSpec, (value) => done(value), () => done(null)),
+		);
+
+		if (!result || result === currentModelSpec) return;
+		setConfiguredModelSpec(result, ctx, result === DEFAULT_IMAGE_MODEL ? "reset" : "set");
+	}
+
 	pi.registerCommand("image-model", {
 		description: "Show or set the secondary vision model (provider/model)",
+		getArgumentCompletions: async (argumentPrefix) => {
+			const ctx = latestCtx;
+			if (!ctx) return null;
+			const query = argumentPrefix.trim().toLowerCase();
+			const items = getImageModelCompletions(ctx);
+			if (!query) return items;
+			return items.filter(
+				(item) =>
+					item.value.toLowerCase().includes(query) ||
+					item.label.toLowerCase().includes(query) ||
+					item.description?.toLowerCase().includes(query),
+			);
+		},
 		handler: async (args, ctx) => {
 			const input = args.trim();
 			if (!input) {
-				ctx.ui.notify(`Secondary vision model: ${getConfiguredModelSpec(ctx)}`, "info");
+				await showImageModelSelector(ctx);
 				return;
 			}
 
 			if (input === "reset") {
-				pi.appendEntry<ConfigState>(CONFIG_ENTRY_TYPE, { modelSpec: DEFAULT_IMAGE_MODEL });
-				updateStatus(ctx);
-				ctx.ui.notify(`Secondary vision model reset to ${DEFAULT_IMAGE_MODEL}`, "info");
+				setConfiguredModelSpec(DEFAULT_IMAGE_MODEL, ctx, "reset");
 				return;
 			}
 
@@ -254,9 +505,7 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			pi.appendEntry<ConfigState>(CONFIG_ENTRY_TYPE, { modelSpec: input });
-			updateStatus(ctx);
-			ctx.ui.notify(`Secondary vision model set to ${input}`, "info");
+			setConfiguredModelSpec(input, ctx);
 		},
 	});
 
@@ -293,6 +542,43 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 				}),
 			),
 		}),
+		renderCall(args, theme) {
+			const question = truncateSingleLine(args.question || "", 140) || "(no question)";
+			let text = theme.fg("toolTitle", theme.bold("secondary vision ")) + theme.fg("muted", question);
+			const meta: string[] = [];
+			if (Array.isArray(args.paths) && args.paths.length > 0) {
+				meta.push(`${args.paths.length} path${args.paths.length === 1 ? "" : "s"}`);
+			}
+			if (args.useRecentImages !== false) meta.push("recent images");
+			if (args.model) meta.push(args.model);
+			if (meta.length > 0) text += `\n${theme.fg("dim", meta.join(" • "))}`;
+			return new Text(text, 0, 0);
+		},
+		renderResult(result, { expanded, isPartial }, theme) {
+			const details = result.details as AnalyzeDetails | undefined;
+			if (isPartial) {
+				const pendingQuestion = details?.question ? truncateSingleLine(details.question, 140) : "Analyzing images...";
+				return new Text(theme.fg("warning", pendingQuestion), 0, 0);
+			}
+
+			const content = result.content.find((item): item is { type: "text"; text: string } => item.type === "text");
+			let text = theme.fg("toolTitle", theme.bold("secondary vision "));
+			if (details) {
+				text += theme.fg("accent", details.model);
+				text += theme.fg("muted", ` (${details.imageCount} image${details.imageCount === 1 ? "" : "s"})`);
+				text += `\n${theme.fg("muted", `Prompt: ${details.question}`)}`;
+			}
+			if (content?.text) text += `\n${content.text}`;
+			if (expanded && details) {
+				text += `\n\n${theme.fg("muted", "Sources:")}`;
+				for (const source of details.sources) text += `\n- ${theme.fg("dim", source)}`;
+				if (details.usage) {
+					text += `\n\n${theme.fg("muted", "Usage:")}`;
+					text += `\n- ${theme.fg("dim", `input ${details.usage.input}, output ${details.usage.output}, total ${details.usage.totalTokens}`)}`;
+				}
+			}
+			return new Text(text, 0, 0);
+		},
 		async execute(_toolCallId, params, _signal, onUpdate, ctx) {
 			const useRecentImages = params.useRecentImages ?? !(params.paths && params.paths.length > 0);
 			const modelSpec = params.model?.trim() || getConfiguredModelSpec(ctx);
@@ -340,6 +626,7 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 		if (details) {
 			text += theme.fg("accent", details.model);
 			text += theme.fg("muted", ` (${details.imageCount} image${details.imageCount === 1 ? "" : "s"})`);
+			text += `\n${theme.fg("muted", `Prompt: ${details.question}`)}`;
 		}
 		text += `\n${message.content}`;
 		if (options.expanded && details) {
@@ -354,10 +641,12 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		updateStatus(ctx);
+		latestCtx = ctx;
+		clearStatus(ctx);
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
-		updateStatus(ctx);
+		latestCtx = ctx;
+		clearStatus(ctx);
 	});
 }
