@@ -14,7 +14,7 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
-const DEFAULT_IMAGE_MODEL = process.env.PI_IMAGE_MODEL?.trim() || "openai-codex/gpt-5.1";
+const DEFAULT_IMAGE_MODEL = process.env.PI_IMAGE_MODEL?.trim() || "openrouter/google/gemini-3.1-pro-preview";
 const CONFIG_ENTRY_TYPE = "image-secondary-model-config";
 
 const MIME_TYPES: Record<string, string> = {
@@ -543,8 +543,9 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 			),
 		}),
 		renderCall(args, theme) {
-			const question = truncateSingleLine(args.question || "", 140) || "(no question)";
-			let text = theme.fg("toolTitle", theme.bold("secondary vision ")) + theme.fg("muted", question);
+			const question = (args.question || "").trim() || "(no question)";
+			let text = theme.fg("toolTitle", theme.bold("secondary vision"));
+			text += `\n${theme.fg("muted", question)}`;
 			const meta: string[] = [];
 			if (Array.isArray(args.paths) && args.paths.length > 0) {
 				meta.push(`${args.paths.length} path${args.paths.length === 1 ? "" : "s"}`);
@@ -562,11 +563,10 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 			}
 
 			const content = result.content.find((item): item is { type: "text"; text: string } => item.type === "text");
-			let text = theme.fg("toolTitle", theme.bold("secondary vision "));
+			let text = theme.fg("toolTitle", theme.bold("result "));
 			if (details) {
 				text += theme.fg("accent", details.model);
 				text += theme.fg("muted", ` (${details.imageCount} image${details.imageCount === 1 ? "" : "s"})`);
-				text += `\n${theme.fg("muted", `Prompt: ${details.question}`)}`;
 			}
 			if (content?.text) text += `\n${content.text}`;
 			if (expanded && details) {
@@ -622,11 +622,10 @@ export default function imageSecondaryModelExtension(pi: ExtensionAPI) {
 
 	pi.registerMessageRenderer("secondary-vision-result", (message, options, theme) => {
 		const details = message.details as AnalyzeDetails | undefined;
-		let text = theme.fg("toolTitle", theme.bold("secondary vision "));
+		let text = theme.fg("toolTitle", theme.bold("result "));
 		if (details) {
 			text += theme.fg("accent", details.model);
 			text += theme.fg("muted", ` (${details.imageCount} image${details.imageCount === 1 ? "" : "s"})`);
-			text += `\n${theme.fg("muted", `Prompt: ${details.question}`)}`;
 		}
 		text += `\n${message.content}`;
 		if (options.expanded && details) {
