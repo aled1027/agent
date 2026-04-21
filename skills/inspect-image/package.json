@@ -1,0 +1,10 @@
+{
+  "name": "@pb-lab/skill-inspect-image",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "JavaScript CLI skill for prompting a vision-capable image model",
+  "bin": {
+    "inspect-image": "./main.js"
+  }
+}
