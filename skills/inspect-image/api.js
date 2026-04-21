@@ -6,6 +6,33 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Remove embedded data URLs before writing debug payloads to disk. Some APIs may
+// echo image-bearing request content back in their JSON, which is terrible for
+// artifact size and downstream context management.
+function sanitizeForJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeForJson);
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value).map(([key, nestedValue]) => {
+      // The common case is image_url.url, but recurse generically so any future
+      // nested data URLs also get stripped.
+      if (key === 'url' && typeof nestedValue === 'string' && nestedValue.startsWith('data:image/')) {
+        return [key, '[omitted data URL]'];
+      }
+      return [key, sanitizeForJson(nestedValue)];
+    });
+    return Object.fromEntries(entries);
+  }
+
+  if (typeof value === 'string' && value.startsWith('data:image/')) {
+    return '[omitted data URL]';
+  }
+
+  return value;
+}
+
 export class OpenRouterClient {
   constructor({ apiKey, model, baseUrl } = {}) {
     this.apiKey = apiKey ?? process.env.OPENROUTER_API_KEY;
@@ -20,6 +47,7 @@ export class OpenRouterClient {
   async analyzeImage({ prompt, imagePath, detail = 'auto', maxTokens, signal } = {}) {
     const mimeType = mimeTypeFor(imagePath);
     const bytes = fs.readFileSync(imagePath);
+    // OpenRouter expects an inline data URL for local image uploads.
     const dataUrl = `data:${mimeType};base64,${bytes.toString('base64')}`;
 
     const body = {
@@ -67,7 +95,9 @@ export class OpenRouterClient {
       throw new Error(`Model response for ${imagePath} did not include choices[0].message.content text.`);
     }
 
-    return { text, raw: data };
+    // Return a sanitized copy for optional JSON export so debugging stays possible
+    // without persisting the original image payload.
+    return { text, raw: sanitizeForJson(data) };
   }
 }
 

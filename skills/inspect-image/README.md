@@ -53,7 +53,11 @@ DEBUG=1 ./inspect-image analyze ./workspace/demo/frame.jpg \
 
 ## Output format
 
-When `--output` is provided, the CLI writes JSON like:
+When `--output` is provided, the CLI writes compact JSON by default and does **not** include the raw API response. This avoids accidentally writing base64 image data into workspace artifacts.
+
+If you explicitly need the raw response for debugging, pass `--include-raw`. Any embedded `data:image/...` URLs are sanitized to `"[omitted data URL]"` before being written.
+
+Default JSON looks like:
 
 ```json
 {
@@ -66,8 +70,7 @@ When `--output` is provided, the CLI writes JSON like:
     {
       "index": 0,
       "image": "/abs/path/to/frame.jpg",
-      "response": "...model output...",
-      "raw": {}
+      "response": "...model output..."
     }
   ]
 }

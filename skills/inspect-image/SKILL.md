@@ -46,7 +46,7 @@ Common commands:
   ./workspace/example/frame-02.jpg \
   --prompt "Describe the player's body position in this frame."
 
-# Output contains one result object per image
+# Output contains one compact result object per image
 ./inspect-image analyze \
   ./workspace/example/frame-01.jpg \
   ./workspace/example/frame-02.jpg \
@@ -85,6 +85,8 @@ On timeout, in-flight requests are aborted via `AbortController` and the process
 ## Practical guidance
 - Relative image and output paths are resolved from the caller's current working directory.
 - Prefer writing outputs under `./workspace/...` rather than temporary directories.
+- `--output` writes compact JSON by default and intentionally omits raw API response payloads so base64 image data does not get dumped into workspace artifacts.
+- If you need raw debugging data, use `--include-raw`; embedded `data:image/...` URLs are sanitized before writing.
 - Use contact sheets when you want one image file to summarize many video moments in a single per-image request.
 - If you pass multiple image paths, the CLI sends one distinct chat completion request per image, dispatches them concurrently, and returns one result per image.
 - Keep prompts concrete: ask for exact objects, actions, timestamps, comparisons, or uncertainties.

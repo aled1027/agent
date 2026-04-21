@@ -27,6 +27,7 @@ Options:
   --api-key <key>         Override API key
   --output <file>         Write JSON output to a file
   --max-tokens <n>        Max completion tokens
+  --include-raw           Include sanitized raw API response in JSON output
   --detail <level>        Image detail hint: low, high, or auto (default: auto)
   --timeout <ms>          Global timeout in milliseconds (default: 60000)
   --help                  Show this help
@@ -68,6 +69,10 @@ function parseArgs(argv) {
       options.output = rest[++i];
     } else if (arg === '--max-tokens') {
       options.maxTokens = Number.parseInt(rest[++i], 10);
+    } else if (arg === '--include-raw') {
+      // Raw responses are excluded by default to avoid dumping large image payloads
+      // into JSON artifacts. Opt-in only for explicit debugging.
+      options.includeRaw = true;
     } else if (arg === '--detail') {
       options.detail = rest[++i];
     } else if (arg === '--timeout') {
@@ -156,12 +161,19 @@ async function main() {
 
         log('✓ completed %s', path.basename(imagePath));
 
-        return {
+        const output = {
           index,
           image: imagePath,
           response: result.text,
-          raw: result.raw,
         };
+
+        // Keep output JSON compact by default. Raw responses may contain echoed
+        // request structure and can bloat saved artifacts significantly.
+        if (parsed.options.includeRaw) {
+          output.raw = result.raw;
+        }
+
+        return output;
       }),
     );
 
@@ -169,6 +181,7 @@ async function main() {
       model: client.model,
       createdAt: new Date().toISOString(),
       prompt,
+      // Each image is analyzed independently rather than as a single multi-image prompt.
       mode: 'separate-conversations-per-image',
       images: imagePaths,
       results,
