@@ -12,6 +12,11 @@
 - `tufte` — data-dense D3 visualizations with Tufte-style principles
 - `web-browser` — browser automation via Chrome DevTools Protocol
 
+## Ignored skills
+
+- `make-interfaces-feel-better` — design engineering principles for polished UI details and interactions
+- `pb-video-analysis` — determine pickleball rally start/end intervals from video
+
 ## Extensions
 
 - `answer` — extracts unanswered questions from the last assistant message into an interactive Q&A flow
