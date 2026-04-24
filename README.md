@@ -1,4 +1,30 @@
-# Pi agent shell notes
+# Pi Agent
+
+## Skills
+
+- `canvas-screenshot` — deterministic canvas/Three.js screenshots
+- `cli-preferences` — preferred CLI tools and conventions
+- `context7` — fetch up-to-date library/framework docs
+- `inspect-image` — analyze local images with a vision model
+- `python` — reusable Python environment for scripting/analysis
+- `rodney` — Chrome browser automation via CLI
+- `slidev` — build developer slide decks with Slidev
+- `tufte` — data-dense D3 visualizations with Tufte-style principles
+- `web-browser` — browser automation via Chrome DevTools Protocol
+
+## Extensions
+
+- `answer` — extracts unanswered questions from the last assistant message into an interactive Q&A flow
+- `block-large-images` — blocks reading image files directly and points the agent to the image-inspection workflow
+- `review` — adds PR/branch/commit/folder review flows with an interactive code review command
+- `todos` — adds file-based todo management plus an interactive todo manager
+- `toolwatch` — audits tool calls/results and can enforce local or remote tool policies
+- `usage-bar` — shows provider usage quotas, reset timers, and service status
+- `vp-update-instruction` — customizes the update notice to use `vp install -g @mariozechner/pi-coding-agent`
+
+## Inactive extensions
+
+- `image-secondary-model` — routes image analysis to a separate vision model via commands/tools
 
 ## Bash aliases in Pi
 
