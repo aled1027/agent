@@ -1,9 +1,12 @@
 # Pi Agent
 
+## AGENTS.md
+
+The AGENTS.md file is loaded into every pi session. Right now, I just put in non-standard CLI tools that the harness otherwise wouldn't know about.
+
 ## Skills
 
 - `canvas-screenshot` — deterministic canvas/Three.js screenshots
-- `cli-preferences` — preferred CLI tools and conventions
 - `context7` — fetch up-to-date library/framework docs
 - `inspect-image` — analyze local images with a vision model
 - `python` — reusable Python environment for scripting/analysis
