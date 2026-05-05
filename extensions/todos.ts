@@ -1438,6 +1438,32 @@ async function deleteTodo(
   return result;
 }
 
+async function deleteDoneTodos(todosDir: string): Promise<{
+  deleted: TodoFrontMatter[];
+  errors: Array<{ id: string; error: string }>;
+}> {
+  const todos = await listTodos(todosDir);
+  const doneTodos = todos.filter((todo) => isTodoClosed(getTodoStatus(todo)));
+  const deleted: TodoFrontMatter[] = [];
+  const errors: Array<{ id: string; error: string }> = [];
+
+  for (const todo of doneTodos) {
+    const filePath = getTodoPath(todosDir, todo.id);
+    try {
+      await fs.unlink(filePath);
+      deleted.push(todo);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") {
+        deleted.push(todo);
+        continue;
+      }
+      errors.push({ id: todo.id, error: error?.message ?? String(error) });
+    }
+  }
+
+  return { deleted, errors };
+}
+
 export default function todosExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const todosDir = getTodosDir(ctx.cwd);
@@ -1797,6 +1823,43 @@ export default function todosExtension(pi: ExtensionAPI) {
         text = appendExpandHint(theme, text);
       }
       return new Text(text, 0, 0);
+    },
+  });
+
+  pi.registerCommand("todos-cleanup", {
+    description: "Delete all done/closed todo files from .pi/todos",
+    handler: async (_args, ctx) => {
+      const todosDir = getTodosDir(ctx.cwd);
+      const doneTodos = (await listTodos(todosDir)).filter((todo) => isTodoClosed(getTodoStatus(todo)));
+
+      if (!doneTodos.length) {
+        const message = "No done todos to delete.";
+        if (ctx.hasUI) ctx.ui.notify(message, "info");
+        else console.log(message);
+        return;
+      }
+
+      if (!ctx.hasUI) {
+        console.log("Confirmation requires interactive UI. Aborted.");
+        return;
+      }
+
+      const confirmed = await ctx.ui.confirm(
+        "Delete done todos",
+        `Delete ${doneTodos.length} done todo${doneTodos.length === 1 ? "" : "s"}? This cannot be undone.`,
+      );
+      if (!confirmed) {
+        ctx.ui.notify("Todo cleanup cancelled", "info");
+        return;
+      }
+
+      const { deleted, errors } = await deleteDoneTodos(todosDir);
+      const deletedText = `Deleted ${deleted.length} done todo${deleted.length === 1 ? "" : "s"}.`;
+
+      ctx.ui.notify(deletedText, errors.length ? "warning" : "info");
+      for (const error of errors) {
+        ctx.ui.notify(`Failed to delete ${formatTodoId(error.id)}: ${error.error}`, "error");
+      }
     },
   });
 
