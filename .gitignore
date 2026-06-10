@@ -44,3 +44,4 @@ venv/
 .eggs/
 *.egg-info/
 dist/
+trust.json
