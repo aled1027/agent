@@ -744,39 +744,10 @@ export default function (pi: ExtensionAPI) {
 
 	// ─── Voice UI ────────────────────────────────────────────────────────────
 
+	// Recording state is shown by the transient recording widget. Keep the
+	// footer uncluttered: do not show idle mic availability or a running timer.
 	function updateVoiceStatus() {
-		if (!ctx?.hasUI) return;
-		switch (voiceState) {
-			case "idle": {
-				if (!config.enabled) {
-					ctx.ui.setStatus("voice", undefined);
-					break;
-				}
-				const modeTag = !config.onboarding.completed ? "SETUP" : config.backend === "local" ? "LOCAL" : "STREAM";
-				ctx.ui.setStatus("voice", `MIC ${modeTag}`);
-				break;
-			}
-			case "warmup":
-				ctx.ui.setStatus("voice", "MIC HOLD...");
-				break;
-			case "recording": {
-				const secs = Math.round((Date.now() - recordingStart) / 1000);
-				// Live audio level meter in status bar
-				const meterLen = 4;
-				const meterFilled = Math.round(audioLevelSmoothed * meterLen);
-				const meter = "█".repeat(meterFilled) + "░".repeat(meterLen - meterFilled);
-				ctx.ui.setStatus("voice", `REC ${secs}s ${meter}`);
-				break;
-			}
-			case "finalizing":
-				if (config.backend === "local") {
-					ctx.ui.setStatus("voice", "STT...");
-				} else {
-					// Don't show "STT..." — live transcript handles it
-					ctx.ui.setStatus("voice", "");
-				}
-				break;
-		}
+		if (ctx?.hasUI) ctx.ui.setStatus("voice", undefined);
 	}
 
 	function setVoiceState(newState: VoiceState) {
@@ -1611,6 +1582,17 @@ export default function (pi: ExtensionAPI) {
 			// reachable by F1 or /voice-help instead.
 			if (matchesKey(data, Key.f1) && ctx?.hasUI) {
 				openHelpOverlay(ctx as unknown as ExtensionCommandContext).catch(() => {});
+				return { consume: true };
+			}
+
+			// In continuous dictation, Enter finalizes the recording instead of
+			// submitting the editor's (possibly interim) transcript to Pi.
+			if (dictationMode && matchesKey(data, Key.enter) && !isKeyRelease(data) && !isKeyRepeat(data)) {
+				dictationMode = false;
+				if (voiceState === "recording") {
+					void stopVoiceRecording();
+					ctx?.ui.notify("Dictation stopped.", "info");
+				}
 				return { consume: true };
 			}
 
@@ -2450,7 +2432,7 @@ export default function (pi: ExtensionAPI) {
 	// ─── /voice command ──────────────────────────────────────────────────────
 
 	pi.registerCommand("voice", {
-		description: "Voice: /voice [on|off|stop|dictate|history|test|info|setup]",
+		description: "Voice: /voice [on|off|stop|dictate|history|test|info|setup] (/voice-dictate alias)",
 		handler: async (args, cmdCtx) => {
 			ctx = cmdCtx;
 			const sub = (args || "").trim().toLowerCase();
@@ -2529,7 +2511,7 @@ export default function (pi: ExtensionAPI) {
 						"🎤 Continuous dictation mode active.",
 						"",
 						"  Speak freely — no need to hold SPACE.",
-						"  /voice stop → finalize and stop",
+						"  Enter or /voice stop → finalize and stop",
 						`  ${toggleShortcutLabel} → also stops dictation`,
 					].join("\n"), "info");
 				} else {
@@ -2748,6 +2730,41 @@ export default function (pi: ExtensionAPI) {
 			updateVoiceStatus();
 			cmdCtx.ui.notify(`Voice ${config.enabled ? "enabled" : "disabled"}.`, "info");
 		},
+	});
+
+	async function startContinuousDictation(cmdCtx: ExtensionCommandContext): Promise<void> {
+		ctx = cmdCtx;
+		if (!config.enabled) {
+			cmdCtx.ui.notify("Voice disabled. Use /voice on", "warning");
+			return;
+		}
+		if (dictationMode) {
+			cmdCtx.ui.notify("Already in dictation mode. Press Enter or use /voice stop to end.", "info");
+			return;
+		}
+		dictationMode = true;
+		editorTextBeforeVoice = cmdCtx.hasUI ? (cmdCtx.ui.getEditorText() || "") : "";
+		const ok = await startVoiceRecording();
+		if (ok) {
+			cmdCtx.ui.notify("🎤 Continuous dictation active. Press Enter or run /voice stop to finalize.", "info");
+		} else {
+			dictationMode = false;
+			cmdCtx.ui.notify("Failed to start dictation.", "error");
+		}
+	}
+
+	// ─── /voice-dictate → start continuous dictation ───────────────────────
+
+	pi.registerCommand("voice-dictate", {
+		description: "Start continuous dictation; press Enter to stop",
+		handler: async (_args, cmdCtx) => startContinuousDictation(cmdCtx),
+	});
+
+	// ─── /vd → compact dictation alias ──────────────────────────────────────
+
+	pi.registerCommand("vd", {
+		description: "Start continuous dictation; press Enter to stop",
+		handler: async (_args, cmdCtx) => startContinuousDictation(cmdCtx),
 	});
 
 	// ─── /voice-setup → redirects to settings panel ─────────────────────────

@@ -51,6 +51,7 @@ const HELP_SECTIONS: ReadonlyArray<HelpSection> = [
 		heading: "Voice (STT)",
 		entries: [
 			{ key: "hold space", desc: "push-to-talk recording" },
+			{ key: "/voice-dictate / /vd", desc: "continuous recording; ↵ finalizes" },
 			{ key: "/voice-toggle", desc: "enable / disable STT" },
 			{ key: "/voice-settings", desc: "open settings panel" },
 			{ key: "/voice-models", desc: "browse / install local STT models" },
