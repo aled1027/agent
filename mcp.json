@@ -1,0 +1,8 @@
+{
+	"mcpServers": {
+		"zen-browser": {
+			"command": "zen-mcp",
+				"lifecycle": "lazy"
+		}
+	}
+}
