@@ -34,6 +34,9 @@ will materially help complete the user's task.
    herdr pane --help
    ```
 
+   Before using tab controls, also read `herdr tab --help` and the help for
+   the intended tab subcommand.
+
 3. Keep the user in the current pane. Create background panes with `--no-focus`.
    Use `--current` or an explicit pane ID; never act on an implicitly focused
    user pane.
@@ -44,7 +47,9 @@ will materially help complete the user's task.
    Do not stop the Herdr server.
 6. Use unique, descriptive agent names, such as `sentry-investigator` or
    `release-reviewer`.
-7. Keep created panes open unless the user asks to close them.
+7. After delivering the result, list the panes/tabs created for the task and
+   ask whether the user wants them closed. Until they answer, leave them open;
+   close only panes/tabs the orchestrator created.
 
 ## Plan delegation around the task
 
@@ -84,18 +89,31 @@ errors from healthy.
 ## Create and start agents
 
 Inspect the current context and layout. The skill does not prescribe a fixed
-workspace, tab, or pane: create a sibling in the caller's current context
-unless the user directs otherwise.
+workspace, tab, or pane.
+
+- For **one or two** background agents, create sibling panes in the caller's
+  current tab.
+- For **three or more** agents, prefer a dedicated, unfocused background tab
+  in the current workspace so the caller's pane remains usable. Use the
+  current tab only if the user asks to keep every agent visible beside it or a
+  background tab is unavailable.
 
 ```bash
 printf 'ws=%s tab=%s pane=%s\n' "$HERDR_WORKSPACE_ID" "$HERDR_TAB_ID" "$HERDR_PANE_ID"
 herdr pane layout --current
 
-# Create a background sibling without taking focus from the caller.
+# One or two agents: create a background sibling without taking focus.
 herdr pane split --current --direction down --cwd "$PWD" --no-focus
 # Read the new pane ID from the JSON response.
 
-# Start a Pi subagent in that idle shell pane.
+# Three or more agents: after reading `herdr tab --help` and
+# `herdr tab create --help`, create a dedicated background tab.
+herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" \
+  --label "agents-<task>" --no-focus
+# Read the new tab ID from the JSON response, locate its initial shell pane,
+# and split only panes in that new tab with --no-focus.
+
+# Start a Pi subagent in each idle shell pane.
 herdr agent start sentry-investigator --kind pi --pane <new-pane-id>
 ```
 
