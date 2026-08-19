@@ -123,15 +123,21 @@ requires an idle interactive shell pane.
 
 ## Prompt, monitor, and recover
 
-Prompt the agent with its complete contract. For independent agents, prompt all
-of them before waiting so their work overlaps.
+Prompt the agent with its complete contract. For a sequential task, submit and
+wait atomically, so a fast response cannot finish before a separate wait begins:
 
 ```bash
-herdr agent prompt sentry-investigator "<bounded task contract>"
-herdr agent wait sentry-investigator --timeout 300000
+herdr agent prompt sentry-investigator "<bounded task contract>" --wait --timeout 300000
 herdr agent get sentry-investigator
 herdr agent read sentry-investigator --source recent-unwrapped --lines 240
 ```
+
+For independent agents, prompt all of them without waiting so their work
+overlaps. Before waiting on an agent, call `agent get`: if it is already
+`idle`, `done`, or `blocked`, read and handle that result instead of starting a
+new wait. Wait only for an agent still working, always with a timeout. Do not
+send another prompt to an agent until its prior prompt has been observed and
+handled.
 
 The orchestrator monitors agents it creates and reports the completed outcome
 back to the user. If an agent is blocked or times out, inspect it with `agent

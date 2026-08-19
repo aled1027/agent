@@ -125,7 +125,7 @@ Submit work through the agent surface:
 herdr agent prompt reviewer "Review the current diff and report only actionable findings." --wait --timeout 120000
 ```
 
-`agent prompt` atomically submits text and encoded Enter while honoring the pane's live bracketed-paste mode. For normal agent work, `--wait` is enough: it waits for the first settled `idle`, `done`, or `blocked` state. Do not repeat those defaults with `--until`.
+`agent prompt` atomically submits text and encoded Enter while honoring the pane's live bracketed-paste mode. For a sequential request, always use `--wait` on that same command: it cannot miss a prompt that completes before a separate `agent wait` starts. It waits for the first settled `idle`, `done`, or `blocked` state. Do not repeat those defaults with `--until`.
 
 A prompt sent from a non-working state must produce an observed lifecycle change within five seconds. Otherwise Herdr returns `agent_prompt_stalled` instead of waiting indefinitely. This wait tracks lifecycle state, not an individual turn; if the agent is already working, completion of the active turn may satisfy it.
 
@@ -161,15 +161,17 @@ Create a sibling pane with the same geometry rule, preserve the caller's working
 herdr pane split --current --direction right --cwd "$PWD" --no-focus
 ```
 
-Read the new pane ID from `.result.pane.pane_id`, then run and inspect the command:
+Read the new pane ID from `.result.pane.pane_id`, then run and inspect one command at a time. Append a unique completion marker, and wait for that marker **before** sending another command to the pane:
 
 ```bash
-herdr pane run <returned-pane-id> "just test"
-herdr pane wait-output <returned-pane-id> --match "test result" --timeout 120000
-herdr pane read <returned-pane-id> --source recent-unwrapped --lines 120
+pane=<returned-pane-id>
+marker="__HERDR_DONE_${RANDOM}_${RANDOM}__"
+herdr pane run "$pane" "just test; status=\$?; printf '\n%s exit=%s\n' '$marker' \"\$status\""
+herdr pane wait-output "$pane" --match "$marker" --timeout 120000
+herdr pane read "$pane" --source recent-unwrapped --lines 120
 ```
 
-`pane run` atomically sends command text and Enter. `pane wait-output` searches the selected snapshot immediately, so output that already exists can match. Use `--match <text>` for a literal substring or `--regex <pattern>` for a Rust regular expression. Omitting `--timeout` allows an indefinite wait.
+`pane run` atomically sends command text and Enter. A command may finish before the next CLI call; `pane wait-output` searches the selected snapshot immediately, so a marker already printed still matches. Do not wait for a generic prompt, shell state, or a later command's output: those are racy and can wait forever after a fast command has already finished. Use `--match <text>` for a literal substring or `--regex <pattern>` for a Rust regular expression. Always give waits a timeout. Commands that `exec`, exit the shell, or otherwise prevent the marker from running need task-specific handling.
 
 Use the read source that matches the task:
 
