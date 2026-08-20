@@ -50,3 +50,4 @@ models-store.json
 mcp-cache.json
 
 # Installed Pi packages and runtime state
+pi-codex-subagents/
