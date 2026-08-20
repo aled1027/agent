@@ -45,3 +45,5 @@ venv/
 *.egg-info/
 dist/
 trust.json
+
+models-store.json
