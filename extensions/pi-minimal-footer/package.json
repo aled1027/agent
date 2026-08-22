@@ -1,7 +1,7 @@
 {
   "name": "@ogulcancelik/pi-minimal-footer",
   "version": "0.1.11",
-  "description": "Minimal footer for pi with context gauge and subscription usage bars",
+  "description": "Minimal footer for pi with repository, model, and context details",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -32,7 +32,6 @@
   },
   "files": [
     "index.ts",
-    "assets/claude.png",
     "README.md",
     "LICENSE"
   ]
