@@ -12,8 +12,6 @@ import { execSync } from "node:child_process";
 interface GitCache {
   branch: string | null;
   dirty: boolean;
-  ahead: number;
-  behind: number;
 }
 
 function parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
@@ -31,9 +29,6 @@ let gitCache: GitCache | null = null;
 function parseGitStatus(output: string): GitCache {
   let branch: string | null = null;
   let dirty = false;
-  let ahead = 0;
-  let behind = 0;
-
   for (const line of output.split("\n")) {
     if (!line) continue;
 
@@ -43,25 +38,16 @@ function parseGitStatus(output: string): GitCache {
       continue;
     }
 
-    if (line.startsWith("# branch.ab ")) {
-      const match = line.match(/^# branch\.ab \+(\d+) -(\d+)$/);
-      if (match) {
-        ahead = parseInt(match[1], 10) || 0;
-        behind = parseInt(match[2], 10) || 0;
-      }
-      continue;
-    }
-
     if (!line.startsWith("# ")) dirty = true;
   }
 
-  return { branch, dirty, ahead, behind };
+  return { branch, dirty };
 }
 
 function sameGitCache(a: GitCache | null, b: GitCache | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.branch === b.branch && a.dirty === b.dirty && a.ahead === b.ahead && a.behind === b.behind;
+  return a.branch === b.branch && a.dirty === b.dirty;
 }
 
 function refreshGitCache(): boolean {
@@ -84,6 +70,7 @@ function refreshGitCache(): boolean {
 
 export default function (pi: ExtensionAPI) {
   const CTX_GAUGE_WIDTH = 12;
+  const FOOTER_BOTTOM_PADDING_LINES = 2;
   const BAR_FILLED = "━";
   const BAR_EMPTY = "─";
   const showCwd = parseBooleanEnv(process.env.PI_MINIMAL_FOOTER_SHOW_CWD, true);
@@ -144,8 +131,7 @@ export default function (pi: ExtensionAPI) {
     const filled = Math.round((clamped / 100) * barWidth);
     const empty = barWidth - filled;
 
-    const color = clamped >= 90 ? "error" : clamped >= 70 ? "warning" : clamped >= 50 ? "accent" : "success";
-    const bar = theme.fg(color, BAR_FILLED.repeat(filled)) + theme.fg("dim", BAR_EMPTY.repeat(empty));
+    const bar = theme.fg("success", BAR_FILLED.repeat(filled)) + theme.fg("dim", BAR_EMPTY.repeat(empty));
     const counts = options?.includeCounts === false || used === undefined || !total ? "" : ` ${formatTokenCount(used)}/${formatTokenCount(total)}`;
 
     return theme.fg("dim", "ctx ") + bar + " " + theme.fg("dim", `${Math.round(clamped)}%${counts}`);
@@ -198,18 +184,15 @@ export default function (pi: ExtensionAPI) {
 
           let branch = "";
           if (showBranch && gitCache?.branch) {
-            branch = theme.fg(gitCache.dirty ? "warning" : "success", gitCache.branch);
-            if (gitCache.dirty) branch += theme.fg("warning", " *");
-            if (gitCache.ahead) branch += theme.fg("success", ` ↑${gitCache.ahead}`);
-            if (gitCache.behind) branch += theme.fg("error", ` ↓${gitCache.behind}`);
+            branch = theme.fg("muted", gitCache.branch);
           }
 
           const modelName = ctx.model?.id?.split("/").pop() || "no-model";
           const plainModel = theme.fg("muted", modelName);
           const thinkingLevel = ctx.model?.reasoning ? getThinkingLevel(ctx) : "off";
-          const model = thinkingLevel === "off" ? plainModel : `${plainModel}${separator}${theme.fg("accent", thinkingLevel)}`;
+          const model = thinkingLevel === "off" ? plainModel : `${plainModel}${separator}${theme.fg("muted", thinkingLevel)}`;
 
-          const cwdText = showCwd ? theme.fg("accent", cwd) : "";
+          const cwdText = showCwd ? theme.fg("muted", cwd) : "";
           const locationVariants = [
             cwdText && branch ? cwdText + separator + branch : "",
             cwdText,
@@ -225,11 +208,13 @@ export default function (pi: ExtensionAPI) {
             renderContextGauge(percentage, theme, used, total, { barWidth: 4, includeCounts: false }),
           ]);
 
-          return wrapFooterSegments([
+          const footerLines = wrapFooterSegments([
             location,
             fitFooterSegment(width, model === plainModel ? [plainModel] : [model, plainModel]),
             contextGauge,
           ], width, separator).map((line) => truncateToWidth(line, width));
+
+          return [...footerLines, ...Array(FOOTER_BOTTOM_PADDING_LINES).fill("")];
         },
       };
     });
