@@ -28,8 +28,7 @@
  * From https://github.com/mitsuhiko/agent-stuff/blob/main/pi-extensions/review.ts
  */
 
-import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { DynamicBorder, BorderedLoader } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
 	fuzzyFilter,
@@ -38,7 +37,8 @@ import {
 	SelectList,
 	Spacer,
 	Text,
-} from "@mariozechner/pi-tui";
+	matchesKey,
+} from "@earendil-works/pi-tui";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
@@ -56,6 +56,40 @@ const REVIEW_SETTINGS_TYPE = "review-settings";
 const REVIEW_LOOP_MAX_ITERATIONS = 10;
 const REVIEW_LOOP_START_TIMEOUT_MS = 15000;
 const REVIEW_LOOP_START_POLL_MS = 50;
+
+// Keep runtime UI primitives local. Pi loads extensions outside its own package
+// scope, so only type-only imports should come from pi-coding-agent.
+type ReviewTheme = { fg(color: string, text: string): string };
+
+class ReviewBorder {
+	constructor(private readonly color: (text: string) => string) {}
+
+	render(width: number): string[] {
+		return [this.color("─".repeat(Math.max(1, width)))];
+	}
+
+	invalidate(): void {}
+}
+
+class ReviewLoader {
+	public onAbort?: () => void;
+
+	constructor(
+		private readonly theme: ReviewTheme,
+		private readonly message: string,
+	) {}
+
+	render(width: number): string[] {
+		const border = this.theme.fg("accent", "─".repeat(Math.max(1, width)));
+		return [border, this.theme.fg("accent", this.message), border];
+	}
+
+	invalidate(): void {}
+
+	handleInput(data: string): void {
+		if (matchesKey(data, "escape")) this.onAbort?.();
+	}
+}
 
 type ReviewSessionState = {
 	active: boolean;
@@ -824,9 +858,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
 		applyAllReviewState(ctx);
 	});
 
-	pi.on("session_switch", (_event, ctx) => {
-		applyAllReviewState(ctx);
-	});
 
 	pi.on("session_tree", (_event, ctx) => {
 		applyAllReviewState(ctx);
@@ -875,7 +906,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
 			const result = await ctx.ui.custom<ReviewPresetValue | null>((tui, theme, _kb, done) => {
 				const container = new Container();
-				container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+				container.addChild(new ReviewBorder((str: string) => theme.fg("accent", str)));
 				container.addChild(new Text(theme.fg("accent", theme.bold("Select a review preset"))));
 
 				const selectList = new SelectList(items, Math.min(items.length, 10), {
@@ -896,7 +927,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
 				container.addChild(selectList);
 				container.addChild(new Text(theme.fg("dim", "Press enter to confirm or esc to go back")));
-				container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+				container.addChild(new ReviewBorder((str: string) => theme.fg("accent", str)));
 
 				return {
 					render(width: number) {
@@ -1000,7 +1031,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
 		const result = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) => {
 			const container = new Container();
-			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+			container.addChild(new ReviewBorder((str: string) => theme.fg("accent", str)));
 			container.addChild(new Text(theme.fg("accent", theme.bold("Select base branch"))));
 
 			const searchInput = new Input();
@@ -1010,7 +1041,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 			const listContainer = new Container();
 			container.addChild(listContainer);
 			container.addChild(new Text(theme.fg("dim", "Type to filter • enter to select • esc to cancel")));
-			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+			container.addChild(new ReviewBorder((str: string) => theme.fg("accent", str)));
 
 			let filteredItems = items;
 			let selectList: SelectList | null = null;
@@ -1099,7 +1130,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
 		const result = await ctx.ui.custom<{ sha: string; title: string } | null>((tui, theme, keybindings, done) => {
 			const container = new Container();
-			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+			container.addChild(new ReviewBorder((str: string) => theme.fg("accent", str)));
 			container.addChild(new Text(theme.fg("accent", theme.bold("Select commit to review"))));
 
 			const searchInput = new Input();
@@ -1109,7 +1140,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 			const listContainer = new Container();
 			container.addChild(listContainer);
 			container.addChild(new Text(theme.fg("dim", "Type to filter • enter to select • esc to cancel")));
-			container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+			container.addChild(new ReviewBorder((str: string) => theme.fg("accent", str)));
 
 			let filteredItems = items;
 			let selectList: SelectList | null = null;
@@ -1768,7 +1799,7 @@ Instructions:
 	): Promise<{ cancelled: boolean; error?: string } | null> {
 		if (showLoader && ctx.hasUI) {
 			return ctx.ui.custom<{ cancelled: boolean; error?: string } | null>((tui, theme, _kb, done) => {
-				const loader = new BorderedLoader(tui, theme, "Returning and summarizing review branch...");
+				const loader = new ReviewLoader(theme, "Returning and summarizing review branch...");
 				loader.onAbort = () => done(null);
 
 				ctx.navigateTree(originId, {
