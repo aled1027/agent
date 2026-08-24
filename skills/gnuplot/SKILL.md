@@ -49,6 +49,7 @@ Use `set key outside` when a legend would overlap dense data. For filled charts,
 - Use inline data (`$DATA << EOD ... EOD`) for small datasets. For large datasets, write a separate temporary data file.
 - Use lines for time series, bars or histograms for categorical/count data, points for sparse observations, and candlesticks for OHLC data.
 - Include a title and axis labels. Include a legend only when multiple series need identification.
+- Use human-facing market notation in display text: render a database symbol such as `PLUME_USDT` as `PLUME/USDT`. Keep the underscore form only in SQL and other machine-facing identifiers.
 - Preserve units, time zones, and data age in the title, axis labels, or adjacent response text where relevant.
 
 Run and validate with:
