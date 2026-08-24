@@ -1,8 +1,6 @@
 {
-	"mcpServers": {
-		"zen-browser": {
-			"command": "zen-mcp",
-				"lifecycle": "lazy"
-		}
-	}
+  "mcpServers": {
+    "zen-browser": { "command": "zen-mcp", "lifecycle": "lazy" },
+    "linear": { "url": "https://mcp.linear.app/mcp", "lifecycle": "lazy" }
+  }
 }
