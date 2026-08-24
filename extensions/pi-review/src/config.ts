@@ -4,8 +4,8 @@
  * The user-editable config lives at:
  *   ~/.pi/agent/extensions/pi-review/config.json
  *
- * Pattern mirrors pi-subagents/src/extension/config.ts. We never touch the
- * top-level settings.json — that file is managed by pi itself.
+ * We never touch the top-level settings.json — that file is managed by pi
+ * itself.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -16,7 +16,8 @@ import type { PiReviewConfig, ReviewerSpec, ScorePerIssueMode } from "./types.js
  * Cheap model used by default for the gate (dedupe + re-score + verdict).
  * The gate is pure de-noise reasoning, so it defaults to a cheap tier;
  * reviewers stay on "inherit" to follow the parent session's stronger model.
- * Override via config.json (`gate.model`) or `--gate-model`.
+ * This is requested only when pi-codex-subagents exposes it in spawn_agent's
+ * allowed model schema; otherwise the gate inherits the parent model.
  */
 export const DEFAULT_GATE_MODEL = "anthropic/claude-haiku-4-5";
 
@@ -205,7 +206,7 @@ export function mergeWithDefaults(raw: unknown): PiReviewConfig {
 		}
 	}
 
-	// Optional budgets (directive path).
+	// Legacy budgets (ignored by the foreground Codex directive).
 	if (r.budgets && typeof r.budgets === "object" && !Array.isArray(r.budgets)) {
 		const b = r.budgets as Record<string, unknown>;
 		base.budgets = base.budgets ?? { turnBudget: { maxTurns: 20, graceTurns: 2 } };
@@ -312,7 +313,7 @@ export function loadConfig(): { config: PiReviewConfig; errors: string[] } {
 	const raw = loadRawConfig();
 	const config = mergeWithDefaults(raw);
 	const validation = validateConfig(config);
-	return { config, errors: validation.ok ? [] : validation.errors };
+	return { config, errors: validation.ok === true ? [] : validation.errors };
 }
 
 /**

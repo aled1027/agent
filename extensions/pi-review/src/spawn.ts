@@ -1,7 +1,7 @@
 /**
  * Subagent process spawn + structured-output read.
  *
- * Pattern ported from pi-subagents/src/runs/shared/{pi-spawn,structured-output}.ts.
+ * This is retained for the legacy direct-process path.
  *
  * The caller passes pre-built CLI args + env (see src/args.ts). We spawn
  * `pi` with stdio piped, wait for exit (with a hard timeout), then read the
@@ -81,8 +81,7 @@ export function resetSpawnImpl(): void {
 
 /**
  * Create a tmp dir for a schema + output pair. The caller owns the lifetime;
- * we just return the paths. Mirrors `createStructuredOutputRuntime` from
- * pi-subagents/src/runs/shared/structured-output.ts:27-36.
+ * we just return the paths.
  */
 export function createRuntimeDir(prefix = "pi-review-structured-"): { dir: string; schemaPath: string; outputPath: string } {
 	const dir = join(tmpdir(), `${prefix}${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
@@ -303,7 +302,7 @@ export async function runSubagent(opts: SpawnOptions): Promise<SpawnResult> {
 			}
 
 			const validation = validateValue(opts.schema, parsed);
-			if (!validation.ok) {
+			if (validation.ok === false) {
 				settle({
 					ok: false,
 					error: `schema validation failed: ${validation.errors.join("; ")}`,

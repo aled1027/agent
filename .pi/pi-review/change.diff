@@ -1,0 +1,908 @@
+diff --git a/extensions/pi-review/CHANGELOG.md b/extensions/pi-review/CHANGELOG.md
+index c903191..06d55b9 100644
+--- a/extensions/pi-review/CHANGELOG.md
++++ b/extensions/pi-review/CHANGELOG.md
+@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
+ 
+ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
+ 
++## Unreleased
++
++### Changed
++- Replaced foreground `pi-subagents` workflowScript orchestration with `pi-codex-subagents`: reviewers are spawned in parallel with `spawn_agent`, collected with `wait_all_agents`, and then passed to a separately spawned gate.
++- Install missing `pi-review-*` Codex templates on first `/review`; existing user-customized templates are left untouched.
++- Removed the foreground pi-subagents budget controls, which have no pi-codex-subagents equivalent.
++
+ ## [0.6.1] - 2026-08-08
+ 
+ ### Fixed
+diff --git a/extensions/pi-review/README.md b/extensions/pi-review/README.md
+index ff542d6..d40c0ea 100644
+--- a/extensions/pi-review/README.md
++++ b/extensions/pi-review/README.md
+@@ -1,8 +1,8 @@
+ # pi-review
+ 
+-Pi extension for code review that runs **in the foreground**: `/review` hands a directive to the main agent, which runs one `subagent({ workflowScript, async:false })` call that fans out parallel reviewers and an inline gate. The whole review streams in chat — no silent background work.
++Pi extension for code review that runs **in the foreground**: `/review` hands a directive to the main agent, which fans out isolated reviewers with pi-codex-subagents and then runs a gate over their collected final replies. The whole review streams in chat — no silent background work.
+ 
+-Requires the **pi-subagents** extension (`pi install npm:pi-subagents`, ≥0.41) — it provides the `subagent` tool's `workflowScript` surface used to fan out.
++Requires the **pi-codex-subagents** extension (`pi install npm:@ogulcancelik/pi-codex-subagents`, ≥0.3.4) — it provides the `spawn_agent` and collection tools used to fan out.
+ 
+ Pattern ported from the Claude code-review plugin. See [reference/](./reference/) for upstream flow notes and the version roadmap.
+ 
+@@ -16,7 +16,7 @@ Pattern ported from the Claude code-review plugin. See [reference/](./reference/
+ 
+ ### `/review`
+ 
+-**CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; lean `pi-review.*` subagents review that file (same orchestration idea as Claude `/code-review`, with token budgets pinned in the directive).
++**CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; isolated `pi-review-<id>` Codex templates review that file (same orchestration idea as Claude `/code-review`).
+ 
+ When called with no arguments, `/review` targets **local git** and tells the main agent to:
+ 
+@@ -47,7 +47,7 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
+ | Flag | Effect |
+ |---|---|
+ | `--lite` | Single-agent fast mode: one reviewer, no gate. |
+-| `--gate-model <id>` | Override the gate model for this run (otherwise `config.gate.model`). |
++| `--gate-model <id>` | Request a gate model for this run. It is passed only when pi-codex-subagents exposes that model in the `spawn_agent` schema. |
+ | `--no-spawn` | Dry run — print the directive that would be injected, and exit. |
+ 
+ ### Removed flags → config
+@@ -60,9 +60,9 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
+ | `--score-per-issue MODE` | `gate.scorePerIssue` |
+ | `--diff path` | *(removed — pass a PR url or run in a dirty repo instead)* |
+ 
+-## Bundled reviewers (v0.5.1 lean agents)
++## Bundled reviewers
+ 
+-Runtime names are `pi-review.<id>` (package agents registered via `pi.subagents.agents`).
++Reviewers are isolated pi-codex-subagents. Each run uses unique task names such as `pi-review-<run>/bugbot`; the bundled `agents/*.md` role instructions are installed as local Codex templates on the first `/review` and are never overwritten.
+ 
+ | ID | Purpose | Default | Tools |
+ |---|---|---|---|
+@@ -77,18 +77,20 @@ Runtime names are `pi-review.<id>` (package agents registered via `pi.subagents.
+ 
+ ## Pipeline
+ 
+-`/review` runs in the foreground: the handler builds a directive and injects it **hidden** into the main agent. The main agent obtains the diff once, then runs **one** `subagent({ workflowScript, async:false })` call that fans out **lean** reviewers and runs the inline gate:
++`/review` runs in the foreground: the handler builds a directive and injects it **hidden** into the main agent. The main agent obtains the diff once, then uses **pi-codex-subagents** to fan out isolated reviewers and collect their final replies before starting the gate:
+ 
+ ```text
+ Step 1  obtain → .pi/pi-review/change.diff + changed-files.txt + change-kind.txt
+-Step 2  subagent({ workflowScript, async:false }) — once
+-          runs.all([ pi-review.* reviewers … ]) → runs.run("gate", { inline findings })
+-Step 3  report from the workflow return value (do not re-read the diff)
++Step 2  spawn_agent × N (one parallel batch) → wait_all_agents
++Step 3  spawn_agent gate (with inline findings) → wait_agent
++Step 4  report from the collected final replies (do not re-read the diff)
+ ```
+ 
++Subagent task names contain a unique per-review run id, so multiple `/review` invocations can safely occur in one parent session.
++
+ **Permissions:** on each `/review`, CC-aligned allow rules (7× `gh` + read-only `git` + Read/Grep) are merged into `.pi/projects/<id>/permissions.local.json` so headless reviewers are not blocked by permission-modes (no ask UI in children).
+ 
+-**Cost:** dominated by N × tool turns. Prefer `--lite` for a cheap pass. Reviewer thinking **inherits** the parent session; only the gate uses `config.gate.thinking`.
++**Cost:** dominated by N × tool turns. Prefer `--lite` for a cheap pass. Subagents inherit the parent model and thinking level by default. To route a reviewer or gate differently, edit the generated templates in `~/.pi/agent/pi-codex-subagents/agents/` or configure pi-codex-subagents model routing. There is no equivalent per-child turn, tool, or timeout budget.
+ 
+ ## Configuration
+ 
+@@ -115,9 +117,6 @@ Run `/review-config` to open it in `$EDITOR`. The file is loaded, merged with th
+     "scorePerIssue": "off"
+   },
+   "concurrency": 4,
+-  "budgets": {
+-    "turnBudget": { "maxTurns": 20, "graceTurns": 2 }
+-  },
+   "reviewers": {
+     "claude-md-compliance": {
+       "model": "anthropic/claude-opus-4-6",
+@@ -138,7 +137,7 @@ Run `/review-config` to open it in `$EDITOR`. The file is loaded, merged with th
+ }
+ ```
+ 
+-Use `"model": "inherit"` on a reviewer to follow the parent session's model. The gate defaults to a cheap tier; override it persistently via `gate.model` in config, or per-run with `--gate-model <id>` (the directive injects it into the gate subagent).
++`reviewers.*.enabled` and `gate.threshold` control the foreground workflow. Reviewer model/thinking settings are superseded by the selected Codex template; `gate.model` and `--gate-model` are requested only when the installed `spawn_agent` schema allows that model. The first `/review` creates missing `pi-review-*.md` templates in `~/.pi/agent/pi-codex-subagents/agents/`; existing templates are never overwritten.
+ 
+ ## TUI output
+ 
+@@ -200,7 +199,8 @@ bun test          # node:test + tsx
+ index.ts                  Pi extension entry; registers /review + /review-config + /review-agents
+ src/types.ts              Shared interfaces (Issue, ReviewerSpec, PiReviewConfig, ReviewReport)
+ src/config.ts             loadConfig / mergeWithDefaults / validateConfig / writeConfig
+-src/args.ts               buildReviewerArgs / buildGateArgs / applyThinkingSuffix
++src/codex-templates.ts    Installs missing pi-review-* Codex templates without overwriting customizations
++src/directive.ts          Builds the spawn → wait-all → gate → wait workflow directive
+ src/spawn.ts              runSubagent (child_process.spawn + structured-output read)
+ src/schema.ts             TypeBox schemas for reviewer + gate outputs
+ src/parallel.ts           mapConcurrent (hard cap 4)
+@@ -208,14 +208,14 @@ src/review.ts             runReviewers — fan-out + per-reviewer spawn
+ src/gate.ts               runGate — single spawn with aggregated prompt
+ src/git-input.ts          resolveDefaultDiff (status / vs default branch)
+ src/report.ts             buildReport + renderReport
+-agents/*.md               Bundled reviewer prompts (incl. lite-review.md for --lite)
++agents/*.md               Bundled reviewer prompts copied into Codex templates on first use
+ prompts/gate.md           Gate subagent prompt
+ tests/*.test.ts           node:test suites
+ ```
+ 
+ ## Limitations (v1)
+ 
+-- No retry: a failed reviewer is recorded as `ok=false` and the rest of the run continues. The gate still runs.
++- No retry: a failed reviewer is recorded as failed and the rest of the run continues. The gate still runs.
+ - No worktree isolation: all reviewers share the parent's cwd.
+ - GitHub: agents use `gh`/`git` to obtain PRs; oversized diffs fall back to git. PR comments are not posted.
+ - No web config UI: only `$EDITOR`.
+diff --git a/extensions/pi-review/index.ts b/extensions/pi-review/index.ts
+index 2ddb10c..1eaa9b9 100644
+--- a/extensions/pi-review/index.ts
++++ b/extensions/pi-review/index.ts
+@@ -8,10 +8,10 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
+ import { existsSync, readFileSync } from "node:fs";
+ 
+ import { parseReviewArgs } from "./src/cli-args.js";
++import { ensureCodexTemplates } from "./src/codex-templates.js";
+ import { buildReviewDirective } from "./src/directive.js";
+ import { checkEligibility } from "./src/eligibility.js";
+ import { resolveReviewTarget } from "./src/git-input.js";
+-import { resolveLeanBudgets } from "./src/lean-agents.js";
+ import { extractPrRef } from "./src/pr-ref.js";
+ import { ensureReviewPermissions } from "./src/review-permissions.js";
+ import { liteReviewer, resolveReviewers } from "./src/run.js";
+@@ -34,7 +34,7 @@ function parentModelId(ctx: ExtensionCommandContext): string | undefined {
+ 
+ export default function (pi: ExtensionAPI) {
+ 	pi.registerCommand("review", {
+-		description: "Foreground code review (lean pi-review.* agents). --lite = single-agent.",
++		description: "Foreground code review with pi-codex-subagents. --lite = single-agent.",
+ 		getArgumentCompletions: (prefix: string) => {
+ 			const trimmed = prefix.trimStart();
+ 			const tokens = trimmed.split(/\s+/).filter(Boolean);
+@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
+ 			if (last.startsWith("--")) {
+ 				return [
+ 					{ value: "--lite", label: "--lite", description: "Fast single-agent review (no gate)" },
+-					{ value: "--gate-model", label: "--gate-model", description: "Override gate model for this run" },
++					{ value: "--gate-model", label: "--gate-model", description: "Request a gate model when Codex routing allows it" },
+ 				].filter((o) => o.value.startsWith(last));
+ 			}
+ 			return null;
+@@ -76,7 +76,7 @@ export default function (pi: ExtensionAPI) {
+ 					isGitRepo: true,
+ 					probedDiff: null,
+ 				});
+-				if (!eligibility.eligible) {
++				if (eligibility.eligible === false) {
+ 					notify(eligibility.reason, "info");
+ 					return;
+ 				}
+@@ -89,7 +89,6 @@ export default function (pi: ExtensionAPI) {
+ 					return;
+ 				}
+ 				const gateModel = resolveModel(parsed.gateModel ?? config.gate.model, parentModel);
+-				const budgets = resolveLeanBudgets(config.budgets);
+ 
+ 				// Merge CC-aligned allow rules so headless reviewers are not blocked.
+ 				try {
+@@ -104,6 +103,11 @@ export default function (pi: ExtensionAPI) {
+ 					);
+ 				}
+ 
++				const createdTemplates = ensureCodexTemplates();
++				if (createdTemplates.length > 0) {
++					notify(`pi-review: installed ${createdTemplates.length} pi-codex-subagents template(s).`, "info");
++				}
++
+ 				const directive = buildReviewDirective({
+ 					target,
+ 					reviewers,
+@@ -112,7 +116,6 @@ export default function (pi: ExtensionAPI) {
+ 					threshold: config.gate.threshold,
+ 					lite: parsed.lite,
+ 					cwd: ctx.cwd,
+-					budgets,
+ 				});
+ 
+ 				// Dry-run: show the directive instead of injecting it.
+@@ -131,7 +134,7 @@ export default function (pi: ExtensionAPI) {
+ 				});
+ 				// b) Hidden directive — the main agent executes it as a user turn
+ 				//    (display:false hides the full text; triggerTurn starts it).
+-				//    The main agent fans out reviewers via the `subagent` tool.
++				//    The main agent fans out reviewers with pi-codex-subagents.
+ 				pi.sendMessage(
+ 					{ customType: "pi-review-directive", content: directive, display: false },
+ 					{ triggerTurn: true },
+@@ -180,7 +183,7 @@ export default function (pi: ExtensionAPI) {
+ 
+ 			const merged = mergeWithDefaults(parsed);
+ 			const validation = validateConfig(merged);
+-			if (!validation.ok) {
++			if (validation.ok === false) {
+ 				ctx.ui.notify(`Config errors: ${validation.errors.join("; ")}`, "error");
+ 				return;
+ 			}
+diff --git a/extensions/pi-review/src/args.ts b/extensions/pi-review/src/args.ts
+index b427ea5..91c3aca 100644
+--- a/extensions/pi-review/src/args.ts
++++ b/extensions/pi-review/src/args.ts
+@@ -1,8 +1,8 @@
+ /**
+  * CLI argument + env builder for spawning `pi` as a subagent.
+  *
+- * Pattern ported from pi-subagents/src/runs/shared/pi-args.ts. Each spawned
+- * subagent gets a fresh, stateless `pi` process with:
++ * Legacy direct-process path. Each spawned subagent gets a fresh, stateless
++ * `pi` process with:
+  *   - explicit --model (with optional :thinking suffix)
+  *   - --tools whitelist (or omitted for the gate, which is pure reasoning)
+  *   - --system-prompt <file> pointing at a temp file we materialize
+@@ -36,7 +36,7 @@ export interface BuiltArgs {
+  * Append a thinking-level suffix to a model id (e.g. "claude-sonnet-4-6:high").
+  * Returns the input unchanged if thinking is missing or "off".
+  *
+- * Mirrors pi-subagents/src/runs/shared/pi-args.ts:76-81 (applyThinkingSuffix).
++ * This legacy helper is retained for the direct-process path.
+  */
+ export function applyThinkingSuffix(model: string, thinking: string | undefined): string {
+ 	if (!thinking || thinking === "off") return model;
+diff --git a/extensions/pi-review/src/config.ts b/extensions/pi-review/src/config.ts
+index 1785a09..f834f0a 100644
+--- a/extensions/pi-review/src/config.ts
++++ b/extensions/pi-review/src/config.ts
+@@ -4,8 +4,8 @@
+  * The user-editable config lives at:
+  *   ~/.pi/agent/extensions/pi-review/config.json
+  *
+- * Pattern mirrors pi-subagents/src/extension/config.ts. We never touch the
+- * top-level settings.json — that file is managed by pi itself.
++ * We never touch the top-level settings.json — that file is managed by pi
++ * itself.
+  */
+ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+ import { homedir } from "node:os";
+@@ -16,7 +16,8 @@ import type { PiReviewConfig, ReviewerSpec, ScorePerIssueMode } from "./types.js
+  * Cheap model used by default for the gate (dedupe + re-score + verdict).
+  * The gate is pure de-noise reasoning, so it defaults to a cheap tier;
+  * reviewers stay on "inherit" to follow the parent session's stronger model.
+- * Override via config.json (`gate.model`) or `--gate-model`.
++ * This is requested only when pi-codex-subagents exposes it in spawn_agent's
++ * allowed model schema; otherwise the gate inherits the parent model.
+  */
+ export const DEFAULT_GATE_MODEL = "anthropic/claude-haiku-4-5";
+ 
+@@ -205,7 +206,7 @@ export function mergeWithDefaults(raw: unknown): PiReviewConfig {
+ 		}
+ 	}
+ 
+-	// Optional budgets (directive path).
++	// Legacy budgets (ignored by the foreground Codex directive).
+ 	if (r.budgets && typeof r.budgets === "object" && !Array.isArray(r.budgets)) {
+ 		const b = r.budgets as Record<string, unknown>;
+ 		base.budgets = base.budgets ?? { turnBudget: { maxTurns: 20, graceTurns: 2 } };
+@@ -312,7 +313,7 @@ export function loadConfig(): { config: PiReviewConfig; errors: string[] } {
+ 	const raw = loadRawConfig();
+ 	const config = mergeWithDefaults(raw);
+ 	const validation = validateConfig(config);
+-	return { config, errors: validation.ok ? [] : validation.errors };
++	return { config, errors: validation.ok === true ? [] : validation.errors };
+ }
+ 
+ /**
+diff --git a/extensions/pi-review/src/directive.ts b/extensions/pi-review/src/directive.ts
+index d17ecc1..ad47a28 100644
+--- a/extensions/pi-review/src/directive.ts
++++ b/extensions/pi-review/src/directive.ts
+@@ -2,22 +2,12 @@
+  * Build the review directive injected into the main agent (hidden, via
+  * `sendMessage` with `display:false` + `triggerTurn:true` — see index.ts).
+  *
+- * v0.6.0: pi-subagents ≥0.41 removed top-level `subagent({ tasks: [...] })`;
+- * fan-out now runs through one `subagent({ workflowScript, async:false })`.
+- * The script fans out lean reviewers via `runs.all([...])` (each child carries
+- * its own toolBudget/turnBudget), then feeds inlined reviewer JSON to the gate
+- * via `runs.run("gate", ...)`. Reviewers return JSON as their final reply.
++ * Reviewers run through pi-codex-subagents. The main agent fans them out with
++ * `spawn_agent`, collects their final replies with `wait_all_agents`, and
++ * starts one gate child after all reviewer outputs are available.
+  */
+ import { join } from "node:path";
+-import {
+-	FALSE_POSITIVE_GUIDANCE,
+-	LEAN_GATE_AGENT,
+-	leanAgentName,
+-	resolveLeanBudgets,
+-	toolBudgetForReviewer,
+-	withThinkingSuffix,
+-	type LeanBudgetSpec,
+-} from "./lean-agents.js";
++import { codexAgentType } from "./codex-templates.js";
+ import { buildObtainDiffScript, DIFF_META_REL } from "./obtain-diff.js";
+ import type { ReviewerSpec, ReviewTarget } from "./types.js";
+ 
+@@ -26,13 +16,11 @@ export interface ReviewDirectiveInput {
+ 	reviewers: ReviewerSpec[];
+ 	/** Resolved gate model id (from config.gate.model or --gate-model). */
+ 	gateModel: string;
+-	/** Optional gate thinking from config (appended as model:thinking). */
++	/** Optional gate thinking from config. */
+ 	gateThinking?: string;
+ 	threshold: number;
+ 	lite: boolean;
+ 	cwd: string;
+-	/** Optional turnBudget override from config.budgets. */
+-	budgets?: LeanBudgetSpec;
+ }
+ 
+ export const DIFF_REL_PATH = join(".pi", "pi-review", "change.diff");
+@@ -56,13 +44,37 @@ export function metaFilePath(cwd: string): string {
+ 	return join(cwd, DIFF_META_REL);
+ }
+ 
++interface ReviewerTask {
++	id: string;
++	taskName: string;
++	message: string;
++}
++
++const FALSE_POSITIVE_GUIDANCE = [
++	"Pre-existing issues on lines the author did not modify",
++	"Pedantic nitpicks a senior engineer would not call out",
++	"Issues a linter, typechecker, or CI would catch",
++	"Generic quality (missing tests/docs) unless a project rule explicitly requires it",
++	"Something that looks like a bug but is intentional given the change",
++].join("; ");
++
++function reviewRunName(): string {
++	// pi-codex-subagents task names are unique within a parent session, so a
++	// second /review in the same conversation needs a distinct namespace.
++	return `pi-review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
++}
++
+ export function buildReviewDirective(input: ReviewDirectiveInput): string {
+ 	const { target, reviewers, gateModel, gateThinking, threshold, lite, cwd } = input;
+-	const budgets = input.budgets ?? resolveLeanBudgets();
+ 	const diffPath = diffFilePath(cwd);
+ 	const filesPath = filesListPath(cwd);
+ 	const kindPath = kindFilePath(cwd);
+-	const gateModelWithThinking = withThinkingSuffix(gateModel, gateThinking);
++	const runName = reviewRunName();
++	const reviewerTasks: ReviewerTask[] = reviewers.map((reviewer) => ({
++		id: reviewer.id,
++		taskName: `${runName}/${reviewer.id}`,
++		message: buildReviewerTask(reviewer.id, diffPath, filesPath, kindPath, target.userContext),
++	}));
+ 	const blocks: string[] = [];
+ 
+ 	blocks.push("# Code review (token-lean)");
+@@ -72,258 +84,126 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
+ 		blocks.push("");
+ 	}
+ 	blocks.push(
+-		`Review the change (${target.label}). Obtain the diff once, run one workflowScript (fan out ${reviewers.length} lean reviewer${reviewers.length === 1 ? "" : "s"}${lite ? " (lite)" : ""}${lite ? "" : " + inline gate"}), then write the report.`,
++		`Review the change (${target.label}). Obtain the diff once, fan out ${reviewers.length} isolated pi-codex-subagents reviewer${reviewers.length === 1 ? "" : "s"}${lite ? " (lite)" : " and then run one gate"}, then write the report.`,
+ 	);
+ 	blocks.push("");
+ 	blocks.push("## Hard rules (do not violate)");
+ 	blocks.push("");
+-	blocks.push(
+-		"- Call `subagent` **exactly one** time in this whole review: the Step 2 workflowScript call.",
+-	);
+-	blocks.push(
+-		lite
+-			? "- Step 2 must be a **single** `subagent({ workflowScript, async:false, ... })` that fans out the lite-reviewer via `runs.all([...])` — never more than one call."
+-			: "- Step 2 must be a **single** `subagent({ workflowScript, async:false, ... })` that fans out **all** reviewers via `runs.all([...])` and runs the inline gate via `runs.run(\"gate\", ...)` — never one call per reviewer, never serial waves.",
+-	);
+-	blocks.push(
+-		"- **Do not retry** or re-spawn if a reviewer times out, hits its turnBudget, returns partial output, or fails — `runs.all` collects failures as `{ ok:false }`; the script continues and you mark failures in the report.",
+-	);
+-	blocks.push(
+-		"- **Do not** call `subagent` for obtaining the diff, verification, re-review, or rewriting the report.",
+-	);
+-	blocks.push(
+-		"- Use the exact `pi-review.*` agents below — do not substitute builtin `reviewer`. Keep per-child `toolBudget` / `turnBudget` and the top-level `async:false` / `context:\"fresh\"` / `timeoutMs`.",
+-	);
+-	blocks.push("- Reviewer models **inherit** the parent session (omit per-child `model` unless the reviewer config sets an explicit model).");
++	blocks.push("- Use **only** the pi-codex-subagents tools: `spawn_agent`, `wait_all_agents`, and (for a non-lite review) `wait_agent`.");
++	blocks.push("- Spawn every reviewer **once and in parallel**: issue all reviewer `spawn_agent` calls in one assistant tool-call batch, then immediately call `wait_all_agents` for exactly those task names.");
++	blocks.push("- Do not retry or re-spawn a failed reviewer. Preserve it as failed in the report.");
++	blocks.push("- Do not use `spawn_agent` for obtaining the diff, verification, re-review, or report writing.");
++	blocks.push("- Pass each listed `agent_type` and `message` verbatim. The matching pi-review template supplies the reviewer role instructions.");
++	blocks.push("- `spawn_agent` children inherit the parent model unless a local pi-codex-subagents template or its configured model routing overrides it. Only pass a `model` when that tool's schema offers the configured value.");
+ 	blocks.push("");
+ 	blocks.push(`**Skip these false positives:** ${FALSE_POSITIVE_GUIDANCE}.`);
+ 	blocks.push("");
+ 
+-	blocks.push(
+-		"First, post the workflow as a markdown checklist into chat, then work through it — flip each `- [ ]` to `- [x]` as you finish.",
+-	);
++	blocks.push("First, post the workflow as a markdown checklist into chat, then work through it — flip each `- [ ]` to `- [x]` as you finish.");
+ 	blocks.push("");
+ 	const todoSteps = [
+ 		`Obtain diff + file list → ${DIFF_REL_PATH} (write only)`,
+-		lite
+-			? "Run one workflowScript: the lite-reviewer (one subagent call)"
+-			: `Run one workflowScript: ${reviewers.length} parallel reviewers + inline gate (one subagent call)`,
+-		"Write the report from the workflow return value",
++		lite ? "Spawn and collect the lite reviewer" : `Spawn and collect ${reviewers.length} parallel reviewers, then run the gate`,
++		"Write the report from the child final replies",
+ 	];
+-	for (const s of todoSteps) blocks.push(`- [ ] ${s}`);
++	for (const step of todoSteps) blocks.push(`- [ ] ${step}`);
+ 	blocks.push("");
+ 
+-	// Step 1 — unchanged: obtain the diff.
+ 	blocks.push("## Step 1 — Obtain the change (you, the main agent)");
+ 	blocks.push("");
+-	blocks.push(
+-		`Create \`${join(cwd, ".pi", "pi-review")}\`, write the diff (+ file list + change-kind + diff-meta). **Do not read, cat, or summarize the diff body.**`,
+-	);
++	blocks.push(`Create \`${join(cwd, ".pi", "pi-review")}\`, write the diff (+ file list + change-kind + diff-meta). **Do not read, cat, or summarize the diff body.**`);
+ 	blocks.push("");
+-	blocks.push(
+-		"**Accuracy:** for a clean tree, **fetch the remote default branch first** and compare against `origin/<base>` (not a stale local `main`/`master`). For PRs, prefer `gh pr diff`; if that fails, fetch `pull/<n>/head` + base and three-dot. Write `diff-meta.txt` so the base/head SHAs are auditable.",
+-	);
++	blocks.push("**Accuracy:** for a clean tree, **fetch the remote default branch first** and compare against `origin/<base>` (not a stale local `main`/`master`). For PRs, prefer `gh pr diff`; if that fails, fetch `pull/<n>/head` + base and three-dot. Write `diff-meta.txt` so the base/head SHAs are auditable.");
+ 	blocks.push("");
+ 	blocks.push("```bash");
+-	blocks.push(
+-		buildObtainDiffScript({
+-			cwd,
+-			diffPath,
+-			filesPath,
+-			kindPath,
+-			metaPath: metaFilePath(cwd),
+-			prRef: target.kind === "pr" && target.prRef ? target.prRef : undefined,
+-		}),
+-	);
+-	blocks.push("```");
+-	blocks.push("");
+-
+-	// Step 2 — single workflowScript call (fan-out + inline gate).
+-	const script = buildWorkflowScript({
+-		reviewers,
++	blocks.push(buildObtainDiffScript({
++		cwd,
+ 		diffPath,
+ 		filesPath,
+ 		kindPath,
+-		userContext: target.userContext,
+-		target,
+-		threshold,
+-		gateModelWithThinking,
+-		budgets,
+-		lite,
+-	});
+-	blocks.push("## Step 2 — Run the review (exactly one subagent workflowScript call)");
++		metaPath: metaFilePath(cwd),
++		prRef: target.kind === "pr" && target.prRef ? target.prRef : undefined,
++	}));
++	blocks.push("```");
+ 	blocks.push("");
+-	blocks.push(
+-		lite
+-			? "The script fans out the single lite-reviewer. Reviewers return JSON as their final reply; the script captures it."
+-			: "The script fans out the lean reviewers in parallel, then feeds their inlined JSON findings to the gate. Reviewers return JSON as their final reply; the script captures each `result.output`.",
+-	);
++
++	blocks.push("## Step 2 — Spawn and collect reviewers");
++	blocks.push("");
++	blocks.push("Make one parallel batch of `spawn_agent` calls with these exact arguments:");
++	for (const reviewer of reviewerTasks) {
++		blocks.push("");
++		blocks.push(`### ${reviewer.id}`);
++		blocks.push("```text");
++		blocks.push(`task_name: ${reviewer.taskName}`);
++		blocks.push(`agent_type: ${codexAgentType(reviewer.id)}`);
++		blocks.push("message:");
++		blocks.push(reviewer.message);
++		blocks.push("```");
++	}
+ 	blocks.push("");
++	blocks.push("After all spawn calls return, collect their final replies:");
+ 	blocks.push("```js");
+-	blocks.push("subagent({");
+-	blocks.push(`  workflowScript: ${JSON.stringify(script)},`);
+-	blocks.push(`  async: false,`);
+-	blocks.push(`  context: "fresh",`);
+-	blocks.push(`  timeoutMs: ${budgets.timeoutMs},`);
+-	blocks.push(`  chatProgress: "milestones",`);
+-	blocks.push("})");
++	blocks.push(`wait_all_agents({ targets: ${JSON.stringify(reviewerTasks.map((task) => task.taskName))} })`);
+ 	blocks.push("```");
+-	blocks.push("");
+-	blocks.push(
+-		"The return value is a JSON object: `{ reviewers: [{ key, ok, output }], gate: { ok, output } | null }`. Each `output` is the child's final reply text (JSON) — parse it to write the report. Mark any `ok:false` reviewer as failed.",
+-	);
++	blocks.push("Treat each returned final response as that reviewer's JSON. Keep failures and malformed JSON as failed reviewers; do not re-read the diff yourself.");
+ 	blocks.push("");
+ 
+-	// Step 3 — Report.
+-	blocks.push("## Step 3 — Report");
++	if (!lite) {
++		blocks.push("## Step 3 — Gate the collected findings");
++		blocks.push("");
++		blocks.push("After `wait_all_agents` returns, concatenate the reviewer final replies (including a FAILED marker for failed children) and append them verbatim after `## Reviewer findings (inline)` in this gate message.");
++		blocks.push(`If the installed \`spawn_agent\` schema offers model \`${gateModel}\`, pass it on the gate spawn; otherwise omit \`model\`. ${gateThinking ? `If it also offers \`thinking\`, pass \`${gateThinking}\`.` : ""}`);
++		blocks.push("```text");
++		blocks.push(`task_name: ${runName}/gate`);
++		blocks.push(`agent_type: ${codexAgentType("gate")}`);
++		blocks.push("message:");
++		blocks.push(buildGateTask(target.label, threshold));
++		blocks.push("```");
++		blocks.push("Call `spawn_agent` once for that gate, then collect it with:");
++		blocks.push("```js");
++		blocks.push(`wait_agent({ targets: [${JSON.stringify(`${runName}/gate`)}] })`);
++		blocks.push("```");
++		blocks.push("The gate final response is JSON. If it fails or is malformed, report the reviewer findings without a gate verdict.");
++		blocks.push("");
++	}
++
++	blocks.push(`## Step ${lite ? "3" : "4"} — Report`);
+ 	blocks.push("");
+-	blocks.push(
+-		"Read the **workflow return value** from Step 2 (the `Return:` object). **Do not re-read the full diff.** Write markdown into chat:",
+-	);
++	blocks.push("Use only the final replies collected above. Do not re-read the full diff. Write markdown into chat:");
+ 	blocks.push("");
+ 	blocks.push("- **Verdict**: `request_changes` if any blocker OR ≥3 major; `approve` if no blocker and no major; otherwise `comment`.");
+ 	blocks.push("- Group findings by reviewer; format `[SEVERITY · category · conf N] file:line — evidence`.");
+-	blocks.push(
+-		lite
+-			? "- Lite mode skips the gate — apply the verdict rule directly."
+-			: "- Short gate summary: verdict, reason, surviving issue count.",
+-	);
++	blocks.push(lite ? "- Lite mode has no gate — apply the verdict rule directly." : "- Include a short gate summary: verdict, reason, surviving issue count.");
+ 	blocks.push("- Cite `file:line`. Skip pre-existing issues, nitpicks, and CI/linter noise.");
+-	blocks.push("- For any `ok:false` child, list it as failed with the error from `output`.");
++	blocks.push("- For any failed child, list its failure/error instead of inventing findings.");
+ 	blocks.push("");
+ 
+ 	return blocks.join("\n");
+ }
+ 
+-/**
+- * Build the inline workflowScript string. Runs all reviewers in parallel via
+- * `runs.all([...])` (each child carries its own toolBudget/turnBudget), then —
+- * unless lite — feeds inlined reviewer JSON to the gate via `runs.run("gate")`.
+- *
+- * Task strings are injected as JSON-stringified JS string literals at the head
+- * of the script (`const TASK_<id> = "...";`). JSON string literals are valid
+- * JS string literals, so quoting/escaping is always correct regardless of the
+- * task text content.
+- */
+-export function buildWorkflowScript(input: {
+-	reviewers: ReviewerSpec[];
+-	diffPath: string;
+-	filesPath: string;
+-	kindPath: string;
+-	userContext?: string;
+-	target: ReviewTarget;
+-	threshold: number;
+-	gateModelWithThinking: string;
+-	budgets: LeanBudgetSpec;
+-	lite: boolean;
+-}): string {
+-	const { reviewers, diffPath, filesPath, kindPath, userContext, target, threshold, gateModelWithThinking, budgets, lite } = input;
+-
+-	// Stable identifier for a reviewer id (e.g. "history-context" → "history_context").
+-	const ident = (id: string): string => id.replace(/[^A-Za-z0-9_]/g, "_");
+-
+-	const lines: string[] = [];
+-
+-	// Pre-declare each reviewer task as a JSON-stringified JS string literal.
+-	for (const r of reviewers) {
+-		const task = buildReviewerTask(r.id, diffPath, filesPath, kindPath, userContext);
+-		lines.push(`const TASK_${ident(r.id)} = ${JSON.stringify(task)};`);
+-	}
+-
+-	// Parallel reviewers — each child carries its own toolBudget/turnBudget.
+-	lines.push("const reviews = await runs.all([");
+-	for (const r of reviewers) {
+-		const tb = toolBudgetForReviewer(r.id);
+-		const modelLine =
+-			r.model && r.model !== "inherit" ? `\n      model: ${JSON.stringify(r.model)},` : "";
+-		lines.push("    {");
+-		lines.push(`      key: ${JSON.stringify(r.id)},`);
+-		lines.push(`      agent: ${JSON.stringify(leanAgentName(r.id))},`);
+-		lines.push(`      task: TASK_${ident(r.id)},`);
+-		lines.push(`      toolBudget: { soft: ${tb.soft}, hard: ${tb.hard} },`);
+-		lines.push(`      turnBudget: { maxTurns: ${budgets.turnBudget.maxTurns}, graceTurns: ${budgets.turnBudget.graceTurns} },${modelLine}`);
+-		lines.push("    },");
+-	}
+-	lines.push("]);");
+-	lines.push("");
+-
+-	// Inline gate (skipped in lite mode).
+-	if (!lite) {
+-		const gateTask = buildGateTask(target.label, threshold);
+-		lines.push(`const TASK_gate = ${JSON.stringify(gateTask)};`);
+-		// Build the inlined reviewer-findings block from each child result.
+-		// NOTE: this line is a plain single-quoted string so the inner `${...}`
+-		// reaches the workflow script as the script's own template-literal syntax
+-		// (a directive.ts template literal here would interpolate it prematurely).
+-		lines.push(
+-			'const gateInput = reviews.map(r => `## ${r.key} (${r.ok ? "ok" : "FAILED"})\\n${r.ok ? r.output : (r.error ?? r.output)}`).join("\\n\\n");',
+-		);
+-		lines.push('const gate = await runs.run("gate", {');
+-		lines.push(`  agent: ${JSON.stringify(LEAN_GATE_AGENT)},`);
+-		lines.push('  task: TASK_gate + "\\n\\n## Reviewer findings (inline)\\n" + gateInput,');
+-		lines.push(`  model: ${JSON.stringify(gateModelWithThinking)},`);
+-		lines.push(`  toolBudget: { soft: ${budgets.gateToolBudget.soft}, hard: ${budgets.gateToolBudget.hard} },`);
+-		lines.push(`  turnBudget: { maxTurns: ${budgets.gateTurnBudget.maxTurns}, graceTurns: ${budgets.gateTurnBudget.graceTurns} },`);
+-		lines.push("});");
+-		lines.push("");
+-		lines.push("return {");
+-		lines.push("  reviewers: reviews.map(r => ({ key: r.key, ok: r.ok, output: r.output })),");
+-		lines.push("  gate: { ok: gate.ok, output: gate.output },");
+-		lines.push("};");
+-	} else {
+-		lines.push("return {");
+-		lines.push("  reviewers: reviews.map(r => ({ key: r.key, ok: r.ok, output: r.output })),");
+-		lines.push("  gate: null,");
+-		lines.push("};");
+-	}
+-
+-	return lines.join("\n");
+-}
+-
+-/** Build the static gate task briefing (reviewer findings are appended inline by the script). */
++/** Build the static gate task briefing; reviewer outputs are appended by the main agent. */
+ function buildGateTask(changeLabel: string, threshold: number): string {
+ 	return [
++		"## Assigned task",
+ 		`Synthesize reviewer findings for change ${changeLabel}.`,
+ 		`Threshold: ${threshold} (drop issues with confidence < ${threshold}).`,
+-		`Reviewer findings are inlined below as JSON text (one block per reviewer). Parse each block's JSON.`,
+-		`If a block fails to parse or the reviewer is FAILED, skip it and note it.`,
+-		`Dedupe by (file, line, category), re-score 1-10, return surviving issues + verdict.`,
++		"Reviewer findings are inlined below as JSON text (one block per reviewer). Parse each block's JSON.",
++		"If a block fails to parse or the reviewer is FAILED, skip it and note it.",
++		"Dedupe by (file, line, category), re-score 1–10, and return surviving issues + verdict.",
+ 		`Skip false positives: ${FALSE_POSITIVE_GUIDANCE}.`,
+-		`Output JSON: {"verdict":"approve|request_changes|comment","issues":[...],"reason":"..."}`,
+-	].join(" ");
++		"Output JSON: {\"verdict\":\"approve|request_changes|comment\",\"issues\":[...],\"reason\":\"...\"}",
++	].join("\n");
+ }
+ 
+-function buildReviewerTask(
+-	id: string,
+-	diffPath: string,
+-	filesPath: string,
+-	kindPath: string,
+-	userContext?: string,
+-): string {
++function buildReviewerTask(id: string, diffPath: string, filesPath: string, kindPath: string, userContext?: string): string {
+ 	const parts = [
++		"## Assigned task",
+ 		`Read ${diffPath} as the change (only diff source — do not re-fetch via gh/git for the patch itself).`,
+ 		`Also read ${filesPath} (changed paths) and ${kindPath} (docs|code).`,
+-		"Follow your system instructions. Stay within budgets; return your findings as JSON in your final reply and stop.",
+-		"Do not read plan.md, progress.md, .pi-subagents transcripts, or node_modules.",
++		"Stay within the role's scope. Return your findings as JSON in your final reply and stop.",
++		"Do not read plan.md, progress.md, subagent transcripts, or node_modules.",
+ 		"Prefer Read/Grep. If you use bash, only simple allowlisted commands (no &&/||/; compounds).",
+ 	];
+-	if (id === "bugbot" || id === "security-review") {
+-		parts.push(
+-			"If change-kind is docs: return empty issues after skimming the diff — no per-file reads. Otherwise prefer diff-only; at most 3 extra file reads; optional git show/log/blame only when a symbol needs clarification.",
+-		);
+-	}
+-	if (id === "history-context") {
+-		parts.push(
+-			"Take ≤5 paths from the file list. Run ONE bash: git log -n 5 --oneline -- <file1> <file2> ... (multiple paths, one command). Optional git blame -L on one suspicious hunk. No per-file separate bash turns.",
+-		);
+-	}
+-	if (id === "claude-md-compliance") {
+-		parts.push(
+-			"Only audit written project rules (AGENTS.md / CLAUDE.md / .pi rules). If none exist, empty issues.",
+-		);
+-	}
+-	if (userContext?.trim()) {
+-		parts.push(`User request: ${userContext.trim()}`);
+-	}
+-	return parts.join(" ");
++	if (userContext?.trim()) parts.push(`User request: ${userContext.trim()}`);
++	return parts.join("\n");
+ }
+diff --git a/extensions/pi-review/src/lean-agents.ts b/extensions/pi-review/src/lean-agents.ts
+deleted file mode 100644
+index b6f4e4b..0000000
+--- a/extensions/pi-review/src/lean-agents.ts
++++ /dev/null
+@@ -1,93 +0,0 @@
+-/**
+- * Mapping from pi-review reviewer ids → pi-subagents runtime agent names,
+- * plus per-child budgets for the token-lean workflowScript directive path.
+- *
+- * Agents live in `agents/*.md` and are registered via package.json
+- * `pi.subagents.agents` so pi-subagents discovers them as package agents
+- * (`pi-review.<id>`).
+- *
+- * Budget model (pi-subagents ≥0.41 workflowScript API): the top-level
+- * `subagent({ workflowScript })` call carries `context`/`timeoutMs` only;
+- * `turnBudget` and per-reviewer `toolBudget` are injected onto each
+- * `runs.all` / `runs.run` child item (child params override workflow
+- * defaults). `runs.run` rejects `tasks`/`chain`/`concurrency` but accepts
+- * `toolBudget`/`turnBudget`/`model`/`output`.
+- */
+-
+-export const LEAN_AGENT_PACKAGE = "pi-review";
+-
+-/** Runtime agent name for a reviewer id (e.g. bugbot → pi-review.bugbot). */
+-export function leanAgentName(reviewerId: string): string {
+-	return `${LEAN_AGENT_PACKAGE}.${reviewerId}`;
+-}
+-
+-/** Gate agent runtime name. */
+-export const LEAN_GATE_AGENT = leanAgentName("gate");
+-
+-export interface ToolBudgetSpec {
+-	soft: number;
+-	hard: number;
+-}
+-
+-export interface LeanBudgetSpec {
+-	/** Per-child turn budget, injected onto each runs.all / runs.run item. */
+-	turnBudget: { maxTurns: number; graceTurns: number };
+-	/** Per-child tool budget for the default reviewer (injected per runs.all item). */
+-	defaultToolBudget: ToolBudgetSpec;
+-	/** Stricter per-child tool budget for history-context (injected per runs.all item). */
+-	historyToolBudget: ToolBudgetSpec;
+-	/** Gate child budgets (injected onto the runs.run("gate", ...) item). */
+-	gateTurnBudget: { maxTurns: number; graceTurns: number };
+-	gateToolBudget: ToolBudgetSpec;
+-	/** Wall-clock timeout for the top-level workflowScript call (ms). */
+-	timeoutMs: number;
+-}
+-
+-/** Defaults (v0.5.2): more headroom; shallow prompts keep real usage lower. */
+-export const LEAN_BUDGETS: LeanBudgetSpec = {
+-	turnBudget: { maxTurns: 20, graceTurns: 2 },
+-	defaultToolBudget: { soft: 20, hard: 32 },
+-	historyToolBudget: { soft: 14, hard: 24 },
+-	gateTurnBudget: { maxTurns: 6, graceTurns: 1 },
+-	gateToolBudget: { soft: 5, hard: 10 },
+-	timeoutMs: 600_000,
+-};
+-
+-export function toolBudgetForReviewer(id: string): ToolBudgetSpec {
+-	if (id === "history-context") return LEAN_BUDGETS.historyToolBudget;
+-	return LEAN_BUDGETS.defaultToolBudget;
+-}
+-
+-/** Merge optional config.budgets.turnBudget over defaults. */
+-export function resolveLeanBudgets(override?: {
+-	turnBudget?: { maxTurns?: number; graceTurns?: number };
+-}): LeanBudgetSpec {
+-	const base = { ...LEAN_BUDGETS, turnBudget: { ...LEAN_BUDGETS.turnBudget } };
+-	if (override?.turnBudget?.maxTurns != null && override.turnBudget.maxTurns >= 1) {
+-		base.turnBudget.maxTurns = Math.min(48, Math.floor(override.turnBudget.maxTurns));
+-	}
+-	if (override?.turnBudget?.graceTurns != null && override.turnBudget.graceTurns >= 0) {
+-		base.turnBudget.graceTurns = Math.floor(override.turnBudget.graceTurns);
+-	}
+-	return base;
+-}
+-
+-/** Append :thinking to a model id when thinking is set (gate path). */
+-export function withThinkingSuffix(model: string, thinking?: string): string {
+-	if (!thinking || thinking === "off" || thinking === "false") return model;
+-	const colon = model.lastIndexOf(":");
+-	const known = ["minimal", "low", "medium", "high", "xhigh", "max", "min"];
+-	if (colon !== -1 && known.includes(model.slice(colon + 1))) {
+-		return `${model.slice(0, colon)}:${thinking}`;
+-	}
+-	return `${model}:${thinking}`;
+-}
+-
+-/** Shared false-positive list (injected once into the directive). */
+-export const FALSE_POSITIVE_GUIDANCE = [
+-	"Pre-existing issues on lines the author did not modify",
+-	"Pedantic nitpicks a senior engineer would not call out",
+-	"Issues a linter, typechecker, or CI would catch",
+-	"Generic quality (missing tests/docs) unless a project rule explicitly requires it",
+-	"Something that looks like a bug but is intentional given the change",
+-].join("; ");
+diff --git a/extensions/pi-review/src/parallel.ts b/extensions/pi-review/src/parallel.ts
+index c70743f..a2ac8ef 100644
+--- a/extensions/pi-review/src/parallel.ts
++++ b/extensions/pi-review/src/parallel.ts
+@@ -1,10 +1,8 @@
+ /**
+  * Bounded-concurrency map helper.
+  *
+- * Copied from pi-subagents/src/runs/shared/parallel-utils.ts:85-105. We
+- * deliberately do not depend on the pi-subagents package directly because
+- * (a) it is a peer/optional dependency for many users, and (b) the helper
+- * is small enough to vendor.
++ * Retained for the legacy direct-process review path. The foreground Codex
++ * workflow uses `spawn_agent` and `wait_all_agents` instead.
+  *
+  * Concurrency cap is a hard ceiling, regardless of how many workers the
+  * caller asks for. We do this so a misconfigured user cannot accidentally
+diff --git a/extensions/pi-review/src/run.ts b/extensions/pi-review/src/run.ts
+index 938af9b..4c8b6d8 100644
+--- a/extensions/pi-review/src/run.ts
++++ b/extensions/pi-review/src/run.ts
+@@ -130,7 +130,7 @@ export async function runReviewPipeline(options: RunPipelineOptions): Promise<Pi
+ 		isGitRepo: git,
+ 		probedDiff,
+ 	});
+-	if (!eligibility.eligible) {
++	if (eligibility.eligible === false) {
+ 		return { kind: "skipped", reason: eligibility.reason };
+ 	}
+ 
+@@ -205,7 +205,7 @@ export async function runReviewPipeline(options: RunPipelineOptions): Promise<Pi
+ 	}
+ 
+ 	const recheck = recheckBeforeOutput(input);
+-	if (!recheck.eligible) {
++	if (recheck.eligible === false) {
+ 		return { kind: "skipped", reason: recheck.reason };
+ 	}
+ 
+diff --git a/extensions/pi-review/src/schema.ts b/extensions/pi-review/src/schema.ts
+index d4606d7..844241d 100644
+--- a/extensions/pi-review/src/schema.ts
++++ b/extensions/pi-review/src/schema.ts
+@@ -1,8 +1,8 @@
+ /**
+  * Structured-output schemas for reviewer and gate subagents.
+  *
+- * Pattern ported from pi-subagents/src/runs/shared/structured-output.ts. The
+- * schemas are used two ways:
++ * These schemas are retained for the legacy direct-process path and are used
++ * two ways:
+  *   1. Serialized to JSON Schema and written to a tmp file the child reads
+  *      via the PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA env var.
+  *   2. Compiled via TypeBox and used by the parent to validate the JSON the
+diff --git a/extensions/pi-review/src/spawn.ts b/extensions/pi-review/src/spawn.ts
+index e06b664..f8e7300 100644
+--- a/extensions/pi-review/src/spawn.ts
++++ b/extensions/pi-review/src/spawn.ts
+@@ -1,7 +1,7 @@
+ /**
+  * Subagent process spawn + structured-output read.
+  *
+- * Pattern ported from pi-subagents/src/runs/shared/{pi-spawn,structured-output}.ts.
++ * This is retained for the legacy direct-process path.
+  *
+  * The caller passes pre-built CLI args + env (see src/args.ts). We spawn
+  * `pi` with stdio piped, wait for exit (with a hard timeout), then read the
+@@ -81,8 +81,7 @@ export function resetSpawnImpl(): void {
+ 
+ /**
+  * Create a tmp dir for a schema + output pair. The caller owns the lifetime;
+- * we just return the paths. Mirrors `createStructuredOutputRuntime` from
+- * pi-subagents/src/runs/shared/structured-output.ts:27-36.
++ * we just return the paths.
+  */
+ export function createRuntimeDir(prefix = "pi-review-structured-"): { dir: string; schemaPath: string; outputPath: string } {
+ 	const dir = join(tmpdir(), `${prefix}${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+@@ -303,7 +302,7 @@ export async function runSubagent(opts: SpawnOptions): Promise<SpawnResult> {
+ 			}
+ 
+ 			const validation = validateValue(opts.schema, parsed);
+-			if (!validation.ok) {
++			if (validation.ok === false) {
+ 				settle({
+ 					ok: false,
+ 					error: `schema validation failed: ${validation.errors.join("; ")}`,
+diff --git a/extensions/pi-review/src/types.ts b/extensions/pi-review/src/types.ts
+index 5f709aa..4ccf087 100644
+--- a/extensions/pi-review/src/types.ts
++++ b/extensions/pi-review/src/types.ts
+@@ -129,8 +129,8 @@ export interface PiReviewConfig {
+ 		inheritSkills: boolean;
+ 	};
+ 	/**
+-	 * Optional budgets for the foreground directive path (pi-subagents).
+-	 * turnBudget.maxTurns defaults to 20 (cap 48).
++	 * Legacy budget settings retained so existing config files remain valid.
++	 * pi-codex-subagents does not apply these to foreground reviews.
+ 	 */
+ 	budgets?: {
+ 		turnBudget?: { maxTurns?: number; graceTurns?: number };

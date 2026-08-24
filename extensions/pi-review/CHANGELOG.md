@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+- Replaced foreground `pi-subagents` workflowScript orchestration with `pi-codex-subagents`: reviewers are spawned in parallel with `spawn_agent`, collected with `wait_all_agents`, and then passed to a separately spawned gate.
+- Install missing `pi-review-*` Codex templates on first `/review`; existing user-customized templates are left untouched.
+- Removed the foreground pi-subagents budget controls, which have no pi-codex-subagents equivalent.
+
 ## [0.6.1] - 2026-08-08
 
 ### Fixed

@@ -1,10 +1,8 @@
 /**
  * Bounded-concurrency map helper.
  *
- * Copied from pi-subagents/src/runs/shared/parallel-utils.ts:85-105. We
- * deliberately do not depend on the pi-subagents package directly because
- * (a) it is a peer/optional dependency for many users, and (b) the helper
- * is small enough to vendor.
+ * Retained for the legacy direct-process review path. The foreground Codex
+ * workflow uses `spawn_agent` and `wait_all_agents` instead.
  *
  * Concurrency cap is a hard ceiling, regardless of how many workers the
  * caller asks for. We do this so a misconfigured user cannot accidentally

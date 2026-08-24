@@ -1,8 +1,8 @@
 /**
  * Structured-output schemas for reviewer and gate subagents.
  *
- * Pattern ported from pi-subagents/src/runs/shared/structured-output.ts. The
- * schemas are used two ways:
+ * These schemas are retained for the legacy direct-process path and are used
+ * two ways:
  *   1. Serialized to JSON Schema and written to a tmp file the child reads
  *      via the PI_SUBAGENT_STRUCTURED_OUTPUT_SCHEMA env var.
  *   2. Compiled via TypeBox and used by the parent to validate the JSON the
