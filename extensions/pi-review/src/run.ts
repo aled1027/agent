@@ -130,7 +130,7 @@ export async function runReviewPipeline(options: RunPipelineOptions): Promise<Pi
 		isGitRepo: git,
 		probedDiff,
 	});
-	if (!eligibility.eligible) {
+	if (eligibility.eligible === false) {
 		return { kind: "skipped", reason: eligibility.reason };
 	}
 
@@ -205,7 +205,7 @@ export async function runReviewPipeline(options: RunPipelineOptions): Promise<Pi
 	}
 
 	const recheck = recheckBeforeOutput(input);
-	if (!recheck.eligible) {
+	if (recheck.eligible === false) {
 		return { kind: "skipped", reason: recheck.reason };
 	}
 

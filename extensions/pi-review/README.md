@@ -1,8 +1,8 @@
 # pi-review
 
-Pi extension for code review that runs **in the foreground**: `/review` hands a directive to the main agent, which runs one `subagent({ workflowScript, async:false })` call that fans out parallel reviewers and an inline gate. The whole review streams in chat — no silent background work.
+Pi extension for code review that runs **in the foreground**: `/review` hands a directive to the main agent, which fans out isolated reviewers with pi-codex-subagents and then runs a gate over their collected final replies. The whole review streams in chat — no silent background work.
 
-Requires the **pi-subagents** extension (`pi install npm:pi-subagents`, ≥0.41) — it provides the `subagent` tool's `workflowScript` surface used to fan out.
+Requires the **pi-codex-subagents** extension (`pi install npm:@ogulcancelik/pi-codex-subagents`, ≥0.3.4) — it provides the `spawn_agent` and collection tools used to fan out.
 
 Pattern ported from the Claude code-review plugin. See [reference/](./reference/) for upstream flow notes and the version roadmap.
 
@@ -16,7 +16,7 @@ Pattern ported from the Claude code-review plugin. See [reference/](./reference/
 
 ### `/review`
 
-**CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; lean `pi-review.*` subagents review that file (same orchestration idea as Claude `/code-review`, with token budgets pinned in the directive).
+**CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; isolated `pi-review-<id>` Codex templates review that file (same orchestration idea as Claude `/code-review`).
 
 When called with no arguments, `/review` targets **local git** and tells the main agent to:
 
@@ -47,7 +47,7 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
 | Flag | Effect |
 |---|---|
 | `--lite` | Single-agent fast mode: one reviewer, no gate. |
-| `--gate-model <id>` | Override the gate model for this run (otherwise `config.gate.model`). |
+| `--gate-model <id>` | Request a gate model for this run. It is passed only when pi-codex-subagents exposes that model in the `spawn_agent` schema. |
 | `--no-spawn` | Dry run — print the directive that would be injected, and exit. |
 
 ### Removed flags → config
@@ -60,9 +60,9 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
 | `--score-per-issue MODE` | `gate.scorePerIssue` |
 | `--diff path` | *(removed — pass a PR url or run in a dirty repo instead)* |
 
-## Bundled reviewers (v0.5.1 lean agents)
+## Bundled reviewers
 
-Runtime names are `pi-review.<id>` (package agents registered via `pi.subagents.agents`).
+Reviewers are isolated pi-codex-subagents. Each run uses unique task names such as `pi-review-<run>/bugbot`; the bundled `agents/*.md` role instructions are installed as local Codex templates on the first `/review` and are never overwritten.
 
 | ID | Purpose | Default | Tools |
 |---|---|---|---|
@@ -77,18 +77,20 @@ Runtime names are `pi-review.<id>` (package agents registered via `pi.subagents.
 
 ## Pipeline
 
-`/review` runs in the foreground: the handler builds a directive and injects it **hidden** into the main agent. The main agent obtains the diff once, then runs **one** `subagent({ workflowScript, async:false })` call that fans out **lean** reviewers and runs the inline gate:
+`/review` runs in the foreground: the handler builds a directive and injects it **hidden** into the main agent. The main agent obtains the diff once, then uses **pi-codex-subagents** to fan out isolated reviewers and collect their final replies before starting the gate:
 
 ```text
 Step 1  obtain → .pi/pi-review/change.diff + changed-files.txt + change-kind.txt
-Step 2  subagent({ workflowScript, async:false }) — once
-          runs.all([ pi-review.* reviewers … ]) → runs.run("gate", { inline findings })
-Step 3  report from the workflow return value (do not re-read the diff)
+Step 2  spawn_agent × N (one parallel batch) → wait_all_agents
+Step 3  spawn_agent gate (with inline findings) → wait_agent
+Step 4  report from the collected final replies (do not re-read the diff)
 ```
+
+Subagent task names contain a unique per-review run id, so multiple `/review` invocations can safely occur in one parent session.
 
 **Permissions:** on each `/review`, CC-aligned allow rules (7× `gh` + read-only `git` + Read/Grep) are merged into `.pi/projects/<id>/permissions.local.json` so headless reviewers are not blocked by permission-modes (no ask UI in children).
 
-**Cost:** dominated by N × tool turns. Prefer `--lite` for a cheap pass. Reviewer thinking **inherits** the parent session; only the gate uses `config.gate.thinking`.
+**Cost:** dominated by N × tool turns. Prefer `--lite` for a cheap pass. Subagents inherit the parent model and thinking level by default. To route a reviewer or gate differently, edit the generated templates in `~/.pi/agent/pi-codex-subagents/agents/` or configure pi-codex-subagents model routing. There is no equivalent per-child turn, tool, or timeout budget.
 
 ## Configuration
 
@@ -115,9 +117,6 @@ Run `/review-config` to open it in `$EDITOR`. The file is loaded, merged with th
     "scorePerIssue": "off"
   },
   "concurrency": 4,
-  "budgets": {
-    "turnBudget": { "maxTurns": 20, "graceTurns": 2 }
-  },
   "reviewers": {
     "claude-md-compliance": {
       "model": "anthropic/claude-opus-4-6",
@@ -138,7 +137,7 @@ Run `/review-config` to open it in `$EDITOR`. The file is loaded, merged with th
 }
 ```
 
-Use `"model": "inherit"` on a reviewer to follow the parent session's model. The gate defaults to a cheap tier; override it persistently via `gate.model` in config, or per-run with `--gate-model <id>` (the directive injects it into the gate subagent).
+`reviewers.*.enabled` and `gate.threshold` control the foreground workflow. Reviewer model/thinking settings are superseded by the selected Codex template; `gate.model` and `--gate-model` are requested only when the installed `spawn_agent` schema allows that model. The first `/review` creates missing `pi-review-*.md` templates in `~/.pi/agent/pi-codex-subagents/agents/`; existing templates are never overwritten.
 
 ## TUI output
 
@@ -200,7 +199,8 @@ bun test          # node:test + tsx
 index.ts                  Pi extension entry; registers /review + /review-config + /review-agents
 src/types.ts              Shared interfaces (Issue, ReviewerSpec, PiReviewConfig, ReviewReport)
 src/config.ts             loadConfig / mergeWithDefaults / validateConfig / writeConfig
-src/args.ts               buildReviewerArgs / buildGateArgs / applyThinkingSuffix
+src/codex-templates.ts    Installs missing pi-review-* Codex templates without overwriting customizations
+src/directive.ts          Builds the spawn → wait-all → gate → wait workflow directive
 src/spawn.ts              runSubagent (child_process.spawn + structured-output read)
 src/schema.ts             TypeBox schemas for reviewer + gate outputs
 src/parallel.ts           mapConcurrent (hard cap 4)
@@ -208,14 +208,14 @@ src/review.ts             runReviewers — fan-out + per-reviewer spawn
 src/gate.ts               runGate — single spawn with aggregated prompt
 src/git-input.ts          resolveDefaultDiff (status / vs default branch)
 src/report.ts             buildReport + renderReport
-agents/*.md               Bundled reviewer prompts (incl. lite-review.md for --lite)
+agents/*.md               Bundled reviewer prompts copied into Codex templates on first use
 prompts/gate.md           Gate subagent prompt
 tests/*.test.ts           node:test suites
 ```
 
 ## Limitations (v1)
 
-- No retry: a failed reviewer is recorded as `ok=false` and the rest of the run continues. The gate still runs.
+- No retry: a failed reviewer is recorded as failed and the rest of the run continues. The gate still runs.
 - No worktree isolation: all reviewers share the parent's cwd.
 - GitHub: agents use `gh`/`git` to obtain PRs; oversized diffs fall back to git. PR comments are not posted.
 - No web config UI: only `$EDITOR`.

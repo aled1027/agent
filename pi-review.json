@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "gate": {
+    "model": "anthropic/claude-haiku-4-5",
+    "thinking": "low",
+    "enabled": true,
+    "threshold": 8,
+    "scorePerIssue": "off"
+  },
+  "concurrency": 4,
+  "reviewers": {
+    "claude-md-compliance": {
+      "id": "claude-md-compliance",
+      "label": "Claude-MD Compliance",
+      "enabled": true,
+      "model": "inherit",
+      "tools": [
+        "read",
+        "grep",
+        "ls"
+      ]
+    },
+    "bugbot": {
+      "id": "bugbot",
+      "label": "Bugbot",
+      "enabled": true,
+      "model": "inherit",
+      "tools": [
+        "read",
+        "grep",
+        "bash"
+      ]
+    },
+    "history-context": {
+      "id": "history-context",
+      "label": "History Context",
+      "enabled": true,
+      "model": "inherit",
+      "tools": [
+        "read",
+        "bash"
+      ]
+    },
+    "security-review": {
+      "id": "security-review",
+      "label": "Security Review",
+      "enabled": true,
+      "model": "inherit",
+      "tools": [
+        "read",
+        "grep",
+        "bash"
+      ]
+    },
+    "code-comments": {
+      "id": "code-comments",
+      "label": "Code Comments",
+      "enabled": true,
+      "model": "inherit",
+      "tools": [
+        "read",
+        "grep"
+      ]
+    },
+    "conventions": {
+      "id": "conventions",
+      "label": "Conventions",
+      "enabled": false,
+      "model": "inherit",
+      "tools": [
+        "read",
+        "grep",
+        "ls"
+      ]
+    }
+  },
+  "inheritance": {
+    "toolsDefault": [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "bash"
+    ],
+    "inheritProjectContext": false,
+    "inheritSkills": false
+  },
+  "budgets": {
+    "turnBudget": {
+      "maxTurns": 20,
+      "graceTurns": 2
+    }
+  }
+}

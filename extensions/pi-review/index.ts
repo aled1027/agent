@@ -8,10 +8,10 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { existsSync, readFileSync } from "node:fs";
 
 import { parseReviewArgs } from "./src/cli-args.js";
+import { ensureCodexTemplates } from "./src/codex-templates.js";
 import { buildReviewDirective } from "./src/directive.js";
 import { checkEligibility } from "./src/eligibility.js";
 import { resolveReviewTarget } from "./src/git-input.js";
-import { resolveLeanBudgets } from "./src/lean-agents.js";
 import { extractPrRef } from "./src/pr-ref.js";
 import { ensureReviewPermissions } from "./src/review-permissions.js";
 import { liteReviewer, resolveReviewers } from "./src/run.js";
@@ -34,7 +34,7 @@ function parentModelId(ctx: ExtensionCommandContext): string | undefined {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("review", {
-		description: "Foreground code review (lean pi-review.* agents). --lite = single-agent.",
+		description: "Foreground code review with pi-codex-subagents. --lite = single-agent.",
 		getArgumentCompletions: (prefix: string) => {
 			const trimmed = prefix.trimStart();
 			const tokens = trimmed.split(/\s+/).filter(Boolean);
@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
 			if (last.startsWith("--")) {
 				return [
 					{ value: "--lite", label: "--lite", description: "Fast single-agent review (no gate)" },
-					{ value: "--gate-model", label: "--gate-model", description: "Override gate model for this run" },
+					{ value: "--gate-model", label: "--gate-model", description: "Request a gate model when Codex routing allows it" },
 				].filter((o) => o.value.startsWith(last));
 			}
 			return null;
@@ -76,7 +76,7 @@ export default function (pi: ExtensionAPI) {
 					isGitRepo: true,
 					probedDiff: null,
 				});
-				if (!eligibility.eligible) {
+				if (eligibility.eligible === false) {
 					notify(eligibility.reason, "info");
 					return;
 				}
@@ -89,7 +89,6 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				const gateModel = resolveModel(parsed.gateModel ?? config.gate.model, parentModel);
-				const budgets = resolveLeanBudgets(config.budgets);
 
 				// Merge CC-aligned allow rules so headless reviewers are not blocked.
 				try {
@@ -104,6 +103,11 @@ export default function (pi: ExtensionAPI) {
 					);
 				}
 
+				const createdTemplates = ensureCodexTemplates();
+				if (createdTemplates.length > 0) {
+					notify(`pi-review: installed ${createdTemplates.length} pi-codex-subagents template(s).`, "info");
+				}
+
 				const directive = buildReviewDirective({
 					target,
 					reviewers,
@@ -112,7 +116,6 @@ export default function (pi: ExtensionAPI) {
 					threshold: config.gate.threshold,
 					lite: parsed.lite,
 					cwd: ctx.cwd,
-					budgets,
 				});
 
 				// Dry-run: show the directive instead of injecting it.
@@ -131,7 +134,7 @@ export default function (pi: ExtensionAPI) {
 				});
 				// b) Hidden directive — the main agent executes it as a user turn
 				//    (display:false hides the full text; triggerTurn starts it).
-				//    The main agent fans out reviewers via the `subagent` tool.
+				//    The main agent fans out reviewers with pi-codex-subagents.
 				pi.sendMessage(
 					{ customType: "pi-review-directive", content: directive, display: false },
 					{ triggerTurn: true },
@@ -180,7 +183,7 @@ export default function (pi: ExtensionAPI) {
 
 			const merged = mergeWithDefaults(parsed);
 			const validation = validateConfig(merged);
-			if (!validation.ok) {
+			if (validation.ok === false) {
 				ctx.ui.notify(`Config errors: ${validation.errors.join("; ")}`, "error");
 				return;
 			}

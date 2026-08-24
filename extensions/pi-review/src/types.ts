@@ -129,8 +129,8 @@ export interface PiReviewConfig {
 		inheritSkills: boolean;
 	};
 	/**
-	 * Optional budgets for the foreground directive path (pi-subagents).
-	 * turnBudget.maxTurns defaults to 20 (cap 48).
+	 * Legacy budget settings retained so existing config files remain valid.
+	 * pi-codex-subagents does not apply these to foreground reviews.
 	 */
 	budgets?: {
 		turnBudget?: { maxTurns?: number; graceTurns?: number };

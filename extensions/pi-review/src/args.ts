@@ -1,8 +1,8 @@
 /**
  * CLI argument + env builder for spawning `pi` as a subagent.
  *
- * Pattern ported from pi-subagents/src/runs/shared/pi-args.ts. Each spawned
- * subagent gets a fresh, stateless `pi` process with:
+ * Legacy direct-process path. Each spawned subagent gets a fresh, stateless
+ * `pi` process with:
  *   - explicit --model (with optional :thinking suffix)
  *   - --tools whitelist (or omitted for the gate, which is pure reasoning)
  *   - --system-prompt <file> pointing at a temp file we materialize
@@ -36,7 +36,7 @@ export interface BuiltArgs {
  * Append a thinking-level suffix to a model id (e.g. "claude-sonnet-4-6:high").
  * Returns the input unchanged if thinking is missing or "off".
  *
- * Mirrors pi-subagents/src/runs/shared/pi-args.ts:76-81 (applyThinkingSuffix).
+ * This legacy helper is retained for the direct-process path.
  */
 export function applyThinkingSuffix(model: string, thinking: string | undefined): string {
 	if (!thinking || thinking === "off") return model;
