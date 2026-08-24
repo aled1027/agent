@@ -1,62 +1,60 @@
 ---
 name: gnuplot
-description: 'This skill should be used when the user invokes "/gnuplot" to plot data from the current context using gnuplot and output the resulting image path.'
-tools: Bash
-disable-model-invocation: true
+description: Create and open a PNG chart in Zed with gnuplot from data in the current context. Use for line, bar, scatter, histogram, or candlestick plots when a visual chart is more useful than a table or terminal text chart.
+allowed-tools: bash
 ---
 
 # Plot data with gnuplot
 
-Plot data from the most recent interaction context using gnuplot. Generate a PNG image with a transparent background and output it as a markdown image so it renders inline.
+Create a self-contained PNG from data in the current context and open it in Zed's image viewer.
 
-## How to plot
+## Workflow
 
-1. Extract or derive plottable data from the current context.
-2. If the Emacs foreground color is not already known from a previous plot in this session, query it:
+1. Extract or derive the data to plot from the current context. If none is available, ask for data or a query.
+2. Create a timestamped temporary output path such as `/tmp/agent-plot-$(date +%s).png` and a matching `.gp` script. Do not use descriptive output filenames.
+3. Write and run the gnuplot script.
+4. Verify that the PNG exists and is non-empty.
+5. Open the image in the existing Zed window:
+
    ```sh
-   emacsclient --eval '
-   (face-foreground (quote default))'
-   ```
-   This returns a hex color like `"#eeffff"`. Reuse it for all subsequent plots.
-3. Write a gnuplot script to a temporary file using that color.
-4. Run gnuplot on the script.
-5. Output the result as a markdown image on its own line:
-   ```
-   ![description](/tmp/agent-plot-XXXX.png)
+   zed -e /tmp/agent-plot-XXXX.png
    ```
 
-```sh
-gnuplot /tmp/agent-plot-XXXX.gp
-```
+6. Report the opened file path. Do not rely on a Markdown image link rendering inside Zed's terminal.
 
-## Gnuplot script template
+## Zed rendering
+
+Render an opaque, light-background PNG so labels remain readable in Zed's image viewer. Use this baseline:
 
 ```gnuplot
-set terminal pngcairo transparent enhanced size 800,500
+set terminal pngcairo enhanced size 800,500 background rgb "#ffffff"
 set output "/tmp/agent-plot-XXXX.png"
 
-FG = "#eeffff"  # from emacsclient query
+FG = "#1f2328"
 set border lc rgb FG
-set key textcolor rgb FG noopaque nobox  # transparent: Emacs bg shows through, FG text stays legible
+set key textcolor rgb FG noopaque nobox
 set xlabel textcolor rgb FG
 set ylabel textcolor rgb FG
 set title textcolor rgb FG
 set xtics textcolor rgb FG
 set ytics textcolor rgb FG
-
-# ... plot commands using the data ...
 ```
 
-## Rules
+Use `set key outside` when a legend would overlap dense data. For filled charts, use a translucent fill such as `fs transparent solid 0.15`.
 
-- Query the Emacs foreground color once per session and reuse it for all subsequent plots. Only query again if the color is not already known.
-- Always use `pngcairo transparent` terminal for transparent background.
-- Always use a timestamp in the filename (e.g., `/tmp/agent-plot-$(date +%s).png`). Never use descriptive names like `agent-plot-lorenz.png`.
-- Use inline data (`$DATA << EOD ... EOD`) when practical. For large datasets, write a separate data file.
-- After gnuplot runs successfully, output a markdown image (`![description](path)`) on its own line.
-- Choose an appropriate plot type for the data (lines, bars, histogram, scatter, etc.).
-- Include a title, axis labels, and a legend when they add clarity.
-- Keep the legend transparent (`noopaque`, no box) so the Emacs background shows through and the FG-colored text stays legible. Never make the key `opaque`: on a transparent terminal it fills the key box with an opaque (often white) background, which hides the light FG text. If the legend would overlap dense or filled data, move it to an empty corner or use `set key outside` rather than making it opaque.
-- Keep plot fills semi-transparent (e.g. `fs transparent solid 0.15`) so any legend or labels drawn over them remain readable against the Emacs background.
-- Use `enhanced` text mode for subscripts/superscripts when needed.
-- If no plottable data exists in the recent context, inform the user.
+`enhanced` interprets `_` as a subscript marker. Escape literal underscores in titles, labels, and legend text (for example, write `PLUME\_USDT` to display `PLUME_USDT`).
+
+## Data and chart selection
+
+- Use inline data (`$DATA << EOD ... EOD`) for small datasets. For large datasets, write a separate temporary data file.
+- Use lines for time series, bars or histograms for categorical/count data, points for sparse observations, and candlesticks for OHLC data.
+- Include a title and axis labels. Include a legend only when multiple series need identification.
+- Preserve units, time zones, and data age in the title, axis labels, or adjacent response text where relevant.
+
+Run and validate with:
+
+```sh
+gnuplot /tmp/agent-plot-XXXX.gp
+test -s /tmp/agent-plot-XXXX.png
+zed -e /tmp/agent-plot-XXXX.png
+```
