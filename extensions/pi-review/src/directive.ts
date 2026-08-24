@@ -89,11 +89,11 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 	blocks.push("");
 	blocks.push("## Hard rules (do not violate)");
 	blocks.push("");
-	blocks.push("- Use **only** the pi-codex-subagents tools: `spawn_agent`, `wait_all_agents`, and (for a non-lite review) `wait_agent`.");
+	blocks.push("- For reviewer orchestration, use **only** the pi-codex-subagents tools: `spawn_agent`, `wait_all_agents`, and (for a non-lite review) `wait_agent`. You may use bash yourself in Step 1 to obtain the change.");
 	blocks.push("- Spawn every reviewer **once and in parallel**: issue all reviewer `spawn_agent` calls in one assistant tool-call batch, then immediately call `wait_all_agents` for exactly those task names.");
 	blocks.push("- Do not retry or re-spawn a failed reviewer. Preserve it as failed in the report.");
 	blocks.push("- Do not use `spawn_agent` for obtaining the diff, verification, re-review, or report writing.");
-	blocks.push("- Pass each listed `agent_type` and `message` verbatim. The matching pi-review template supplies the reviewer role instructions.");
+	blocks.push("- Pass each listed reviewer `agent_type` and `message` verbatim. The matching pi-review template supplies the reviewer role instructions. For the gate, use its listed base message and append the collected reviewer findings exactly as Step 3 specifies.");
 	blocks.push("- `spawn_agent` children inherit the parent model unless a local pi-codex-subagents template or its configured model routing overrides it. Only pass a `model` when that tool's schema offers the configured value.");
 	blocks.push("");
 	blocks.push(`**Skip these false positives:** ${FALSE_POSITIVE_GUIDANCE}.`);
