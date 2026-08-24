@@ -52,3 +52,4 @@ mcp-cache.json
 # Installed Pi packages and runtime state
 pi-codex-subagents/
 .pi/projects/3fc0577f/permissions.local.json
+mcp-cache.json
