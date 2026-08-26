@@ -1,6 +1,27 @@
 {
   "mcpServers": {
     "zen-browser": { "command": "zen-mcp", "lifecycle": "lazy" },
-    "linear": { "url": "https://mcp.linear.app/mcp", "lifecycle": "lazy" }
+    "linear": { "url": "https://mcp.linear.app/mcp", "lifecycle": "lazy" },
+    "anki": {
+      "command": "npx",
+      "args": ["-y", "@ankimcp/anki-mcp-server@0.24.2", "--stdio"],
+      "env": { "ANKI_CONNECT_URL": "http://localhost:8765" },
+      "lifecycle": "lazy",
+      "requestTimeoutMs": 30000,
+      "excludeTools": [
+        "guiBrowse",
+        "guiSelectCard",
+        "guiSelectedNotes",
+        "guiAddCards",
+        "guiEditNote",
+        "guiDeckOverview",
+        "guiDeckBrowser",
+        "guiCurrentCard",
+        "guiShowQuestion",
+        "guiShowAnswer",
+        "guiUndo"
+      ],
+      "approveTools": ["deleteNotes", "deleteMediaFile", "clearUnusedTags", "removeModelField", "replaceTags"]
+    }
   }
 }
