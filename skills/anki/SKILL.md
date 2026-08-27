@@ -24,6 +24,10 @@ Treat Anki as **retrieval practice**, not note storage. Design each card as a sm
 7. **Use review failures as design evidence.** Repeated failure usually means the cue is vague, the answer is oversized, several facts compete, the distinction is not understood, or the card has too little context. Add context, expose the contrast, split the task, or delete a low-value card.
    - **Done:** Each persistent failure has a specific redesign, not merely more repetitions.
 
+## Bulk collection changes
+
+For an import, migration, bulk edit, or any change affecting more than 10 notes, read [AnkiConnect bulk operations](ANKICONNECT.md) before modifying the collection. Prefer Python with the direct AnkiConnect endpoint: it makes the request, response, verification, and retry state explicit. Use the Anki MCP tools for a single note or a small interactive change.
+
 ## Card design rules
 
 ### Atomic retrieval
