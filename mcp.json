@@ -2,6 +2,11 @@
   "mcpServers": {
     "zen-browser": { "command": "zen-mcp", "lifecycle": "lazy" },
     "linear": { "url": "https://mcp.linear.app/mcp", "lifecycle": "lazy" },
+    "xcodebuild": {
+      "command": "/Users/alexledger/.vite-plus/bin/xcodebuildmcp",
+      "args": ["mcp"],
+      "lifecycle": "lazy"
+    },
     "anki": {
       "command": "npx",
       "args": ["-y", "@ankimcp/anki-mcp-server@0.24.2", "--stdio"],
