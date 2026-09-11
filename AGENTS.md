@@ -1,7 +1,6 @@
 ## Working conventions
 
 - Use `rg` for text search and `lit` to parse supported documents.
-- Use Zen MCP only when the user explicitly asks for it.
 - When creating a branch, use a short change-based name with no prefix.
 - Write user-facing responses in plain language, following ISO 24495-1:2023 - Plain language.
 - If you are ever asked to use plain language, follow ISO 24495-1:2023 - Plain language.
