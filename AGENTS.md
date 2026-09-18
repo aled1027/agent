@@ -2,6 +2,7 @@
 
 - Use `rg` for text search and `lit` to parse supported documents.
 - When creating a branch, use a short change-based name with no prefix.
+- When the user only asks to open a URL, open it in their existing Google Chrome session with `open -a "Google Chrome" "<url>"`. Use browser automation when interaction is requested.
 - Write user-facing responses in plain language, following ISO 24495-1:2023 - Plain language.
 - If you are ever asked to use plain language, follow ISO 24495-1:2023 - Plain language.
 
