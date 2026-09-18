@@ -1,5 +1,21 @@
 # Pi Agent
 
+## Personal Codex subscription
+
+`pi` uses the work Codex subscription. `pipersonal` uses the personal subscription:
+
+```zsh
+pipersonal() {
+  PI_CODING_AGENT_DIR="$HOME/.pi/codex-personal" \
+  PI_CODING_AGENT_SESSION_DIR="$HOME/.pi/codex-personal/sessions" \
+  command pi "$@"
+}
+```
+
+The function lives in `~/.zshrc`. Its profile keeps a separate `auth.json`, session directory, and model cache. Configuration paths in `~/.pi/codex-personal` are symlinks to this directory, so both accounts share settings, skills, extensions, prompts, MCP configuration, keybindings, and agent instructions. Changes to shared configuration affect both accounts.
+
+To sign in, run `pipersonal` and use `/login`. Run `pi` for the work subscription.
+
 ## AGENTS.md
 
 The AGENTS.md file is loaded into every pi session. Right now, I just put in non-standard CLI tools that the harness otherwise wouldn't know about.
