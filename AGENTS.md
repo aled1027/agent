@@ -8,7 +8,7 @@
 
 ## JPEG work
 
-For JPEG operational or data work, read `~/git/jpeg/jpeg-alex/docs` before choosing a workflow. Use the document that matches the task:
+For JPEG operational or data work, read `~/git/jpeg-group/jpeg-alex/docs` before choosing a workflow. Use the document that matches the task:
 
 - Infrastructure, logs, restarts, or investigations: `AWS.md`, `Sentry.md`, and `How To/`.
 - Database access, schemas, orders, or algorithm parameters: `DB - *.md`.
