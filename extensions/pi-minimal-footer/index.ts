@@ -69,10 +69,7 @@ function refreshGitCache(): boolean {
 }
 
 export default function (pi: ExtensionAPI) {
-  const CTX_GAUGE_WIDTH = 12;
   const FOOTER_BOTTOM_PADDING_LINES = 2;
-  const BAR_FILLED = "━";
-  const BAR_EMPTY = "─";
   const showCwd = parseBooleanEnv(process.env.PI_MINIMAL_FOOTER_SHOW_CWD, true);
   const showBranch = parseBooleanEnv(process.env.PI_MINIMAL_FOOTER_SHOW_BRANCH, true);
   let tuiRef: { requestRender: () => void } | null = null;
@@ -119,22 +116,10 @@ export default function (pi: ExtensionAPI) {
     return lines;
   }
 
-  function renderContextGauge(
-    percentage: number,
-    theme: any,
-    used?: number,
-    total?: number,
-    options?: { barWidth?: number; includeCounts?: boolean }
-  ): string {
-    const barWidth = Math.max(4, options?.barWidth ?? CTX_GAUGE_WIDTH);
+  function renderContextUsage(percentage: number, theme: any, used?: number, total?: number, includeCounts = true): string {
     const clamped = Math.max(0, Math.min(100, percentage));
-    const filled = Math.round((clamped / 100) * barWidth);
-    const empty = barWidth - filled;
-
-    const bar = theme.fg("success", BAR_FILLED.repeat(filled)) + theme.fg("dim", BAR_EMPTY.repeat(empty));
-    const counts = options?.includeCounts === false || used === undefined || !total ? "" : ` ${formatTokenCount(used)}/${formatTokenCount(total)}`;
-
-    return theme.fg("dim", "ctx ") + bar + " " + theme.fg("dim", `${Math.round(clamped)}%${counts}`);
+    const counts = includeCounts && used !== undefined && total ? ` ${formatTokenCount(used)}/${formatTokenCount(total)}` : "";
+    return theme.fg("dim", `ctx ${Math.round(clamped)}%${counts}`);
   }
 
   function getThinkingLevel(ctx: any): string {
@@ -200,18 +185,15 @@ export default function (pi: ExtensionAPI) {
           ].filter(Boolean) as string[];
           const location = locationVariants.length ? fitFooterSegment(width, locationVariants) : "";
 
-          const contextGauge = fitFooterSegment(width, [
-            renderContextGauge(percentage, theme, used, total, { barWidth: CTX_GAUGE_WIDTH, includeCounts: true }),
-            renderContextGauge(percentage, theme, used, total, { barWidth: 10, includeCounts: false }),
-            renderContextGauge(percentage, theme, used, total, { barWidth: 8, includeCounts: false }),
-            renderContextGauge(percentage, theme, used, total, { barWidth: 6, includeCounts: false }),
-            renderContextGauge(percentage, theme, used, total, { barWidth: 4, includeCounts: false }),
+          const contextUsage = fitFooterSegment(width, [
+            renderContextUsage(percentage, theme, used, total),
+            renderContextUsage(percentage, theme, used, total, false),
           ]);
 
           const footerLines = wrapFooterSegments([
             location,
             fitFooterSegment(width, model === plainModel ? [plainModel] : [model, plainModel]),
-            contextGauge,
+            contextUsage,
           ], width, separator).map((line) => truncateToWidth(line, width));
 
           return [...footerLines, ...Array(FOOTER_BOTTOM_PADDING_LINES).fill("")];
