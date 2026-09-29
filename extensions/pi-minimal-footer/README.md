@@ -1,12 +1,12 @@
 # pi-minimal-footer
 
-A compact custom footer for [pi](https://github.com/earendil-works/pi). This local version shows working-directory and git state, the selected model and thinking level, plus the current context-window gauge.
+A compact custom footer for [pi](https://github.com/earendil-works/pi). This local version shows working-directory and git state, the selected model and thinking level, plus current context-window usage.
 
 It intentionally does **not** fetch or display subscription, provider, or model quotas.
 
 ## Features
 
-- **Context gauge** — context-window usage and token counts
+- **Context usage** — percentage and token counts
 - **Model and thinking level** — the active model and reasoning setting
 - **Git integration** — branch name
 - **Responsive layout** — wraps cleanly in narrow terminals
