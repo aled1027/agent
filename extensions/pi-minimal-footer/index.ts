@@ -69,7 +69,6 @@ function refreshGitCache(): boolean {
 }
 
 export default function (pi: ExtensionAPI) {
-  const FOOTER_BOTTOM_PADDING_LINES = 2;
   const showCwd = parseBooleanEnv(process.env.PI_MINIMAL_FOOTER_SHOW_CWD, true);
   const showBranch = parseBooleanEnv(process.env.PI_MINIMAL_FOOTER_SHOW_BRANCH, true);
   let tuiRef: { requestRender: () => void } | null = null;
@@ -196,7 +195,7 @@ export default function (pi: ExtensionAPI) {
             contextUsage,
           ], width, separator).map((line) => truncateToWidth(line, width));
 
-          return [...footerLines, ...Array(FOOTER_BOTTOM_PADDING_LINES).fill("")];
+          return footerLines;
         },
       };
     });
