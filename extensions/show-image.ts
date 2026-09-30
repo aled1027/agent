@@ -49,7 +49,7 @@ export default function (pi: ExtensionAPI) {
       return new Image(
         readFileSync(absolutePath).toString("base64"),
         mediaType,
-        theme,
+        { fallbackColor: (s: string) => theme.fg("muted", s) },
         { maxWidthCells: 80, maxHeightCells: 24 },
       );
     },
