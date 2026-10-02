@@ -18,4 +18,6 @@ For JPEG operational or data work, read `~/git/jpeg-group/jpeg-alex/docs` before
 
 ## Guardrails
 
-Use `@aliou/pi-guardrails` as the authority for privileged or destructive commands. When it asks for confirmation, explain why the command is needed and request approval; in non-interactive work, treat a blocked command as unavailable. Keep secret environment files protected, including `.env`, `.env.local`, `.env.production`, `.env.prod`, and `.dev.vars`.
+Use `@aliou/pi-guardrails` as the authority for privileged or destructive commands. When it asks for confirmation, explain why the command is needed and request approval; in non-interactive work, treat a blocked command as unavailable.
+
+If a guarded command is denied or blocked, don't retry it. Either reach the goal with a command that doesn't need approval, or add a TODO that names the exact command and why it's needed so the user can run it later. Then continue with the rest of the task. Keep secret environment files protected, including `.env`, `.env.local`, `.env.production`, `.env.prod`, and `.dev.vars`.
