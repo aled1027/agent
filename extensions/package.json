@@ -1,6 +1,7 @@
 {
   "private": true,
   "dependencies": {
+    "@aliou/sh": "^0.3.3",
     "@earendil-works/pi-coding-agent": "^0.80.7",
     "@earendil-works/pi-tui": "^0.80.7",
     "sherpa-onnx-node": "^1.13.4",
