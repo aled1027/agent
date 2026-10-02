@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "linear": { "url": "https://mcp.linear.app/mcp" },
+    "xcodebuild": {
+      "command": "/Users/alexledger/.vite-plus/bin/xcodebuildmcp",
+      "args": ["mcp"]
+    },
+    "anki": {
+      "command": "npx",
+      "args": ["-y", "@ankimcp/anki-mcp-server@0.24.2", "--stdio"],
+      "env": { "ANKI_CONNECT_URL": "http://localhost:8765" },
+      "timeout": 30,
+      "toolExposure": {
+        "guiBrowse": "hidden",
+        "guiSelectCard": "hidden",
+        "guiSelectedNotes": "hidden",
+        "guiAddCards": "hidden",
+        "guiEditNote": "hidden",
+        "guiDeckOverview": "hidden",
+        "guiDeckBrowser": "hidden",
+        "guiCurrentCard": "hidden",
+        "guiShowQuestion": "hidden",
+        "guiShowAnswer": "hidden",
+        "guiUndo": "hidden"
+      }
+    }
+  }
+}

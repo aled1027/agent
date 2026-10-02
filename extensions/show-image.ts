@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Image } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
 
@@ -31,6 +32,15 @@ export default function (pi: ExtensionAPI) {
 
       if (!mediaType) throw new Error("Supported formats: PNG, JPEG, GIF, WebP");
       readFileSync(absolutePath);
+
+      // Inside tmux, inline images don't render. Terms watches this pane option
+      // and opens the image in its right panel.
+      const pane = process.env.TMUX_PANE;
+      if (pane && !absolutePath.includes("\n")) {
+        try {
+          execFileSync("tmux", ["set-option", "-p", "-t", pane, "@schmuck-show-image", absolutePath], { stdio: "ignore", timeout: 500 });
+        } catch {}
+      }
 
       return {
         content: [{ type: "text", text: `Displayed ${absolutePath}` }],
