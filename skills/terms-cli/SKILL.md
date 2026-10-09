@@ -1,6 +1,6 @@
 ---
 name: terms-cli
-description: Control Terms (formerly Schmuck), the native macOS tmux frontend, with the `terms` CLI. Use when asked to create, rename, or re-point Terms groups; open, close, rename, split, move, select, read, or type into Terms tabs; or launch an agent in a Terms tab.
+description: Control Terms (formerly Schmuck), the native macOS tmux frontend, with the `terms` CLI. Use when asked to create, rename, or re-point Terms groups; open, close, rename, split, move, select, read, or type into Terms tabs; launch an agent in a Terms tab; list, create, or update a repository's to-dos (`docs/todos/`); or show the user a to-do or a side panel view.
 ---
 
 # Terms CLI
@@ -45,6 +45,12 @@ terms tab:move tab=@123 group=Research         # move a tab to another group
 terms select tab=@123                          # or: terms select group=misc (overview)
 terms refresh
 terms quit                                     # tmux terminals keep running
+terms todos [status=open,in-progress] [label=terms] [tab=@123]   # path, status, labels, title
+terms todo:set path=docs/todos/x.md status=in-progress           # and/or labels=a,b (labels= clears)
+terms todo:new title="Fix the flaky test" labels=terms           # prints docs/todos/fix-the-flaky-test.md
+terms todo:delete path=docs/todos/x.md                           # moves it to the Trash
+terms panel show=todos todo=docs/todos/x.md    # show the user a to-do; also show=review|images|notes
+terms panel hide
 ```
 
 A tab and a terminal are the same thing: one tmux window. `tab:new` selects the new tab unless you pass `background`; use `background` when the user is working elsewhere. A program that exits closes its tab.
@@ -58,12 +64,29 @@ A tab and a terminal are the same thing: one tmux window. `tab:new` selects the 
 
 `wait` exits non-zero on timeout or if the tab closes. A tab with no status shows `-`.
 
+## To-dos
+
+A repository keeps one Markdown file per to-do in `docs/todos/` and `<app>/docs/todos/`. Each starts with front matter: `status` (`in-progress`, `open`, `idea`, or `done`), optional `labels`, and optional `blocked_by`, then a `# Title`. A title starting with `Needs input:` means the user must decide something; the question ends the file. Read the repository's `docs/todos/README.md` for its rules rather than guessing them.
+
+The to-do commands use the repository of the selected tab's current directory; `tab=` picks another tab's. Paths are from the repository root, as `terms todos` prints them, or absolute; anything outside the to-do folders is refused. `todo:set` changes only the `status:` and `labels:` lines; edit the text with your file tools. An open To-dos panel shows every change within a second.
+
+A typical run:
+
+1. Find work: `terms todos status=open`, then read the file.
+2. Claim it: `terms todo:set path=P status=in-progress`.
+3. Do the work, and add a short progress note to the file.
+4. Finish: `terms todo:set path=P status=done`. If you need a decision instead, start the title with `Needs input:`, end the file with the question, and leave it `in-progress`.
+
+After you create or change a to-do the user should look at, such as a `Needs input:` question or a new to-do you filed, show it: `terms panel show=todos todo=P`. It opens the side panel on that to-do for the selected tab's repository, so use it only when that is the repository you worked in. Use `terms panel show=review` to point the user at your uncommitted changes. Don't switch the panel for routine updates.
+
 ## Not covered
 
-Focusing, renaming, or swapping panes, joining tabs into splits, reordering, the Review panel, and worktrees are app-only. Point the user to them: right-click menus, drag and drop, Command-K, Command-Shift-R, and File → New Worktree.
+Focusing, renaming, or swapping panes, joining tabs into splits, reordering, Review comments, and worktrees are app-only. Point the user to them: right-click menus, drag and drop, Command-K, Command-Shift-R, and File → New Worktree.
 
 Showing an image in the side panel works from inside a pane: `tmux set-option -p -t "$TMUX_PANE" @schmuck-show-image /absolute/path.png`.
 
 ## Care
 
 Closing a tab or sending `C-c` stops work. Do it only for tabs you created or the user named. Keep credentials out of `text=` and program arguments.
+
+`todo:delete` moves the file to the macOS Trash; the user can restore it, but delete only to-dos you created or the user named. Change only the to-dos your task touches: leave the status, labels, and text of other to-dos alone.
