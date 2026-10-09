@@ -31,6 +31,7 @@ terms group:set group=misc name="Misc"         # rename
 terms group:delete group=Research              # its tabs keep running
 terms tab:new group=misc dir=. -- pi "fix the failing test"   # prints the new tab ID
 terms tab:new group=misc background -- pi "..."               # don't switch to it
+terms tab:new parent=@123 background -- pi "..."              # child tab under @123, shown with ↳
 terms tab:rename tab=@123 name=server
 terms tab:send tab=@123 text="npm test" enter  # literal text, then Return
 terms tab:send tab=@123 keys="C-c"             # tmux key names, space-separated
