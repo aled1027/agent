@@ -5,8 +5,8 @@ This directory is a local, static copy of Ponytail's Pi extension. Pi loads it f
 ## Original source
 
 - Repository: <https://github.com/DietrichGebert/ponytail>
-- Copied version: `4.9.0`
-- Copied commit: `2ed6c52c9d7e5e56942508591085fd45dea277d3`
+- Copied version: `5.1.0`
+- Copied commit: `9cc65d03aa2da1db7121b912d03596409ee340b8`
 
 The original Pi package provided six skills and one extension. The skills are stored separately in `~/.pi/agent/skills/`:
 
@@ -23,6 +23,8 @@ The original Pi package provided six skills and one extension. The skills are st
 - `hooks/ponytail-config.js` reads and writes Ponytail settings.
 - `hooks/ponytail-instructions.js` loads the static core skill.
 - `package.json` and `hooks/package.json` preserve the JavaScript module formats required by the extension.
+
+Upstream's Pi package uses only `pi-extension/index.js`, `hooks/ponytail-config.js`, `hooks/ponytail-instructions.js`, and the six `skills/*/SKILL.md` files. Other upstream hooks and `skills/plugin.json` serve other agents and are not copied.
 
 The extension reads its mode settings from `~/.config/ponytail/config.json` unless an environment variable overrides them. It supports `PONYTAIL_DEFAULT_MODE`, `PONYTAIL_QUIET_STARTUP`, and `PONYTAIL_HIDE_STATUS`.
 
