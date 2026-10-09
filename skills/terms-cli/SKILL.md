@@ -7,7 +7,7 @@ description: Control Terms (formerly Schmuck), the native macOS tmux frontend, w
 
 `terms` controls the running Terms app. Run `terms help` for the current command list. If it reports that Terms is not running, ask the user to open Terms.
 
-Terms was renamed from Schmuck. Stored identifiers keep the old name: the tmux session `schmuck-native`, pane options `@schmuck-*`, and bundle ID `com.alexledger.schmuck`.
+Terms was renamed from Schmuck. Its tmux session is `terms`; pane options (`@schmuck-*`) and the bundle ID (`com.alexledger.schmuck`) keep the old name.
 
 ## Syntax
 
@@ -37,7 +37,7 @@ terms tab:send tab=@123 text="npm test" enter  # literal text, then Return
 terms tab:send tab=@123 keys="C-c"             # tmux key names, space-separated
 terms tab:read tab=@123 lines=200              # screen plus 200 lines of scrollback
 terms tab:read pane=%45                        # one pane of a split tab
-terms tab:close tab=@123                       # stops every process in the tab
+terms tab:close tab=@123                       # archives the tab; it keeps running until closed permanently in the Terms sidebar
 terms tab:split tab=@123 side=down             # split the active pane; side=right is the default
 terms wait tab=@123 status=done,blocked timeout=900   # prints the status that matched
 terms wait pane=%45 text="All tests passed"   # prints "text" when it appears on screen
