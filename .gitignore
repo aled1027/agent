@@ -50,7 +50,9 @@ models-store.json
 mcp-cache.json
 
 # Installed Pi packages and runtime state
-pi-codex-subagents/
+ignore-extensions/pi-codex-subagents/
+extensions/subagent/
+subagents/
 .pi/projects/3fc0577f/permissions.local.json
 mcp-cache.json
 mcp-npx-cache.json

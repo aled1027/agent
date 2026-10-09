@@ -8,7 +8,6 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { existsSync, readFileSync } from "node:fs";
 
 import { parseReviewArgs } from "./src/cli-args.js";
-import { ensureCodexTemplates } from "./src/codex-templates.js";
 import { buildReviewDirective } from "./src/directive.js";
 import { checkEligibility } from "./src/eligibility.js";
 import { resolveReviewTarget } from "./src/git-input.js";
@@ -34,7 +33,7 @@ function parentModelId(ctx: ExtensionCommandContext): string | undefined {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("review", {
-		description: "Foreground code review with pi-codex-subagents. --lite = single-agent.",
+		description: "Foreground code review with pi-subagent. --lite = single-agent.",
 		getArgumentCompletions: (prefix: string) => {
 			const trimmed = prefix.trimStart();
 			const tokens = trimmed.split(/\s+/).filter(Boolean);
@@ -42,7 +41,7 @@ export default function (pi: ExtensionAPI) {
 			if (last.startsWith("--")) {
 				return [
 					{ value: "--lite", label: "--lite", description: "Fast single-agent review (no gate)" },
-					{ value: "--gate-model", label: "--gate-model", description: "Request a gate model when Codex routing allows it" },
+					{ value: "--gate-model", label: "--gate-model", description: "Run the gate on this model (provider/id)" },
 				].filter((o) => o.value.startsWith(last));
 			}
 			return null;
@@ -103,16 +102,13 @@ export default function (pi: ExtensionAPI) {
 					);
 				}
 
-				const createdTemplates = ensureCodexTemplates();
-				if (createdTemplates.length > 0) {
-					notify(`pi-review: installed ${createdTemplates.length} pi-codex-subagents template(s).`, "info");
-				}
-
 				const directive = buildReviewDirective({
 					target,
 					reviewers,
 					gateModel,
 					gateThinking: config.gate.thinking,
+					parentModel,
+					inheritance: config.inheritance,
 					threshold: config.gate.threshold,
 					lite: parsed.lite,
 					cwd: ctx.cwd,
@@ -134,7 +130,7 @@ export default function (pi: ExtensionAPI) {
 				});
 				// b) Hidden directive — the main agent executes it as a user turn
 				//    (display:false hides the full text; triggerTurn starts it).
-				//    The main agent fans out reviewers with pi-codex-subagents.
+				//    The main agent fans out reviewers with the `subagent` CLI.
 				pi.sendMessage(
 					{ customType: "pi-review-directive", content: directive, display: false },
 					{ triggerTurn: true },

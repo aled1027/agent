@@ -1,8 +1,8 @@
 # pi-review
 
-Pi extension for code review that runs **in the foreground**: `/review` hands a directive to the main agent, which fans out isolated reviewers with pi-codex-subagents and then runs a gate over their collected final replies. The whole review streams in chat — no silent background work.
+Pi extension for code review that runs **in the foreground**: `/review` hands a directive to the main agent, which fans out isolated reviewers with the `subagent` CLI and then runs a gate over their collected final replies. The whole review streams in chat — no silent background work.
 
-Requires the **pi-codex-subagents** extension (`pi install npm:@ogulcancelik/pi-codex-subagents`, ≥0.3.4) — it provides the `spawn_agent` and collection tools used to fan out.
+Requires [pi-subagent](https://github.com/badlogic/pi-subagent) (the `subagent` CLI on `PATH`) and tmux.
 
 Pattern ported from the Claude code-review plugin. See [reference/](./reference/) for upstream flow notes and the version roadmap.
 
@@ -16,7 +16,7 @@ Pattern ported from the Claude code-review plugin. See [reference/](./reference/
 
 ### `/review`
 
-**CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; isolated `pi-review-<id>` Codex templates review that file (same orchestration idea as Claude `/code-review`).
+**CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; isolated `review-<id>` subagents review that file (same orchestration idea as Claude `/code-review`).
 
 When called with no arguments, `/review` targets **local git** and tells the main agent to:
 
@@ -47,7 +47,7 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
 | Flag | Effect |
 |---|---|
 | `--lite` | Single-agent fast mode: one reviewer, no gate. |
-| `--gate-model <id>` | Request a gate model for this run. It is passed only when pi-codex-subagents exposes that model in the `spawn_agent` schema. |
+| `--gate-model <id>` | Run the gate on this model (`provider/id`) for this run. |
 | `--no-spawn` | Dry run — print the directive that would be injected, and exit. |
 
 ### Removed flags → config
@@ -62,7 +62,7 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
 
 ## Bundled reviewers
 
-Reviewers are isolated pi-codex-subagents. Each run uses unique task names such as `pi-review-<run>/bugbot`; the bundled `agents/*.md` role instructions are installed as local Codex templates on the first `/review` and are never overwritten.
+Reviewers are isolated `subagent` children named `review-<id>`. On each `/review`, the bundled `agents/*.md` role instructions plus the task are written to `.pi/pi-review/prompts/<id>.md` and passed with `subagent spawn --file`.
 
 | ID | Purpose | Default | Tools |
 |---|---|---|---|
@@ -77,20 +77,21 @@ Reviewers are isolated pi-codex-subagents. Each run uses unique task names such 
 
 ## Pipeline
 
-`/review` runs in the foreground: the handler builds a directive and injects it **hidden** into the main agent. The main agent obtains the diff once, then uses **pi-codex-subagents** to fan out isolated reviewers and collect their final replies before starting the gate:
+`/review` runs in the foreground: the handler builds a directive and injects it **hidden** into the main agent. The main agent obtains the diff once, then uses the **`subagent` CLI** to fan out isolated reviewers and collect their final replies before starting the gate:
 
 ```text
 Step 1  obtain → .pi/pi-review/change.diff + changed-files.txt + change-kind.txt
-Step 2  spawn_agent × N (one parallel batch) → wait_all_agents
-Step 3  spawn_agent gate (with inline findings) → wait_agent
-Step 4  report from the collected final replies (do not re-read the diff)
+Step 2  subagent spawn × N (one bash call) → subagent wait × N
+Step 3  write reviewer-findings.md → subagent spawn gate → subagent wait
+Step 4  subagent stop every child
+Step 5  report from the collected final replies (do not re-read the diff)
 ```
 
-Subagent task names contain a unique per-review run id, so multiple `/review` invocations can safely occur in one parent session.
+Children are addressed by the handle `subagent spawn` prints, so names need not be unique across runs.
 
 **Permissions:** on each `/review`, CC-aligned allow rules (7× `gh` + read-only `git` + Read/Grep) are merged into `.pi/projects/<id>/permissions.local.json` so headless reviewers are not blocked by permission-modes (no ask UI in children).
 
-**Cost:** dominated by N × tool turns. Prefer `--lite` for a cheap pass. Subagents inherit the parent model and thinking level by default. To route a reviewer or gate differently, edit the generated templates in `~/.pi/agent/pi-codex-subagents/agents/` or configure pi-codex-subagents model routing. There is no equivalent per-child turn, tool, or timeout budget.
+**Cost:** dominated by N × tool turns. Prefer `--lite` for a cheap pass. Reviewers on `"model": "inherit"` use the parent model and thinking level; any other `provider/id` is passed as `--provider/--model`, and `thinking` as `--thinking`. There is no per-child turn budget; `subagent wait` times out after 1800 s.
 
 ## Configuration
 
@@ -137,7 +138,7 @@ Run `/review-config` to open it in `$EDITOR`. The file is loaded, merged with th
 }
 ```
 
-`reviewers.*.enabled` and `gate.threshold` control the foreground workflow. Reviewer model/thinking settings are superseded by the selected Codex template; `gate.model` and `--gate-model` are requested only when the installed `spawn_agent` schema allows that model. The first `/review` creates missing `pi-review-*.md` templates in `~/.pi/agent/pi-codex-subagents/agents/`; existing templates are never overwritten.
+`reviewers.*.enabled` and `gate.threshold` control the foreground workflow. Reviewer `model`, `thinking`, and `tools` map to `subagent spawn` flags. `inheritance.inheritSkills` / `inheritProjectContext` set to `false` add `--no-skills` / `--no-context-files`. To change a role, edit `agents/<id>.md` in this extension.
 
 ## TUI output
 
@@ -199,7 +200,6 @@ bun test          # node:test + tsx
 index.ts                  Pi extension entry; registers /review + /review-config + /review-agents
 src/types.ts              Shared interfaces (Issue, ReviewerSpec, PiReviewConfig, ReviewReport)
 src/config.ts             loadConfig / mergeWithDefaults / validateConfig / writeConfig
-src/codex-templates.ts    Installs missing pi-review-* Codex templates without overwriting customizations
 src/directive.ts          Builds the spawn → wait-all → gate → wait workflow directive
 src/spawn.ts              runSubagent (child_process.spawn + structured-output read)
 src/schema.ts             TypeBox schemas for reviewer + gate outputs

@@ -45,10 +45,12 @@ The AGENTS.md file is loaded into every pi session. Right now, I just put in non
 - `toolwatch` — audits tool calls/results and can enforce local or remote tool policies
 - `usage-bar` — shows provider usage quotas, reset timers, and service status
 - `vp-update-instruction` — customizes the update notice to use `vp install -g @mariozechner/pi-coding-agent`
+- `pi-review` — `/review`: parallel reviewers plus a gate, run through the `subagent` CLI
+- `subagent` — [pi-subagent](https://github.com/badlogic/pi-subagent): tmux-backed subagents via the `subagent` CLI (`bin/subagent` symlink) and `/subagent`. Not tracked in this repo. Local change: in Terms, `/subagent` opens the child in a Terms tab instead of switching the tmux client (`index.ts`, `inTerms`/`openInTerms`). It is committed locally in that clone; update with `git -C extensions/subagent pull --rebase`.
 
 ## Inactive extensions
 
-None
+- `ignore-extensions/pi-codex-subagents` — templates and run history from the replaced `@ogulcancelik/pi-codex-subagents` package
 
 ## The Python Bash Alias Wasn't WOrking
 

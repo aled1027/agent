@@ -2,7 +2,7 @@
  * Bounded-concurrency map helper.
  *
  * Retained for the legacy direct-process review path. The foreground Codex
- * workflow uses `spawn_agent` and `wait_all_agents` instead.
+ * workflow uses the `subagent` CLI instead.
  *
  * Concurrency cap is a hard ceiling, regardless of how many workers the
  * caller asks for. We do this so a misconfigured user cannot accidentally

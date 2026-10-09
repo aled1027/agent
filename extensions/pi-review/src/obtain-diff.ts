@@ -18,7 +18,7 @@ export interface ObtainDiffScriptInput {
 	prRef?: string;
 }
 
-function q(s: string): string {
+export function q(s: string): string {
 	return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
