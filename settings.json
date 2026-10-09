@@ -1,0 +1,50 @@
+{
+  "lastChangelogVersion": "1.1.0",
+  "theme": "light/dark",
+  "editorPaddingX": 1,
+  "transport": "auto",
+  "quietStartup": true,
+  "treeFilterMode": "default",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-5-5",
+  "enabledModels": [
+    "openai-codex/*",
+    "anthropic/*"
+  ],
+  "voice": {
+    "version": 2,
+    "enabled": true,
+    "language": "en",
+    "scope": "global",
+    "toggleShortcut": "ctrl+shift+v",
+    "ttsEnabled": false,
+    "ttsBackend": "local",
+    "ttsLocalModel": "kitten-nano-en-v0_2",
+    "ttsLocalVoiceId": 0,
+    "ttsDeepgramVoiceId": "aura-asteria-en",
+    "ttsSpeed": 1,
+    "ttsAutoSpeak": true,
+    "autoSubmitOnSpeak": false,
+    "holdThresholdMs": 700,
+    "ttsDeepgramStreaming": false,
+    "ttsOnboardingShown": false,
+    "onboarding": {
+      "completed": true,
+      "schemaVersion": 2,
+      "completedAt": "2026-07-29T17:11:20.485Z",
+      "source": "migration"
+    }
+  },
+  "hideThinkingBlock": false,
+  "defaultThinkingLevel": "high",
+  "packages": [
+    "npm:pi-web-access",
+    "npm:pi-cost",
+    "npm:@gotgenes/pi-anthropic-auth"
+  ],
+  "tuiMode": "fullscreen",
+  "fullscreenWheelScrollLines": 5,
+  "warnings": {
+    "anthropicExtraUsage": false
+  }
+}
