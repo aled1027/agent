@@ -2,13 +2,14 @@
  * Build the review directive injected into the main agent (hidden, via
  * `sendMessage` with `display:false` + `triggerTurn:true` — see index.ts).
  *
- * Reviewers run through pi-codex-subagents. The main agent fans them out with
- * `spawn_agent`, collects their final replies with `wait_all_agents`, and
- * starts one gate child after all reviewer outputs are available.
+ * Reviewers run through the `subagent` CLI (pi-subagent). Each child's full
+ * prompt (role + task) is written to `.pi/pi-review/prompts/<id>.md`; the main
+ * agent spawns them with `subagent spawn --file`, collects replies with
+ * `subagent wait`, runs one gate child, then stops every child.
  */
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { codexAgentType } from "./codex-templates.js";
-import { buildObtainDiffScript, DIFF_META_REL } from "./obtain-diff.js";
+import { buildObtainDiffScript, DIFF_META_REL, q } from "./obtain-diff.js";
 import type { ReviewerSpec, ReviewTarget } from "./types.js";
 
 export interface ReviewDirectiveInput {
@@ -18,6 +19,10 @@ export interface ReviewDirectiveInput {
 	gateModel: string;
 	/** Optional gate thinking from config. */
 	gateThinking?: string;
+	/** Parent session model (`provider/id`); children inherit it unless a different model is configured. */
+	parentModel?: string;
+	/** Default reviewer tools and whether children see project context files and skills. */
+	inheritance?: { toolsDefault: string[]; inheritProjectContext: boolean; inheritSkills: boolean };
 	threshold: number;
 	lite: boolean;
 	cwd: string;
@@ -44,11 +49,8 @@ export function metaFilePath(cwd: string): string {
 	return join(cwd, DIFF_META_REL);
 }
 
-interface ReviewerTask {
-	id: string;
-	taskName: string;
-	message: string;
-}
+const PROMPTS_REL = join(".pi", "pi-review", "prompts");
+const AGENT_DIR = new URL("../agents/", import.meta.url);
 
 const FALSE_POSITIVE_GUIDANCE = [
 	"Pre-existing issues on lines the author did not modify",
@@ -58,23 +60,64 @@ const FALSE_POSITIVE_GUIDANCE = [
 	"Something that looks like a bug but is intentional given the change",
 ].join("; ");
 
-function reviewRunName(): string {
-	// pi-codex-subagents task names are unique within a parent session, so a
-	// second /review in the same conversation needs a distinct namespace.
-	return `pi-review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+/** Bundled role instructions without frontmatter. */
+function roleBody(id: string): string {
+	const source = readFileSync(new URL(`${id}.md`, AGENT_DIR), "utf8");
+	if (!source.startsWith("---\n")) return source.trim();
+	const end = source.indexOf("\n---", 4);
+	return (end === -1 ? source : source.slice(end + 4)).trim();
+}
+
+function writePrompt(cwd: string, id: string, task: string): string {
+	const dir = join(cwd, PROMPTS_REL);
+	mkdirSync(dir, { recursive: true });
+	const path = join(dir, `${id}.md`);
+	writeFileSync(path, `${roleBody(id)}\n\n${task}\n`, "utf8");
+	return path;
+}
+
+/** `subagent spawn` command. Model flags are added only when they differ from the parent session. */
+function spawnCommand(opts: {
+	name: string;
+	tools: string[];
+	model?: string;
+	thinking?: string;
+	parentModel?: string;
+	isolation: string[];
+	files: string[];
+}): string {
+	const parts = ["subagent spawn", "--name", q(opts.name), "--tools", q(opts.tools.join(",")), ...opts.isolation];
+	if (opts.model && opts.model !== opts.parentModel && opts.model.includes("/")) {
+		const slash = opts.model.indexOf("/");
+		parts.push("--provider", q(opts.model.slice(0, slash)), "--model", q(opts.model.slice(slash + 1)));
+	}
+	if (opts.thinking) parts.push("--thinking", q(opts.thinking));
+	for (const file of opts.files) parts.push("--file", q(file));
+	return parts.join(" ");
 }
 
 export function buildReviewDirective(input: ReviewDirectiveInput): string {
-	const { target, reviewers, gateModel, gateThinking, threshold, lite, cwd } = input;
+	const { target, reviewers, gateModel, gateThinking, parentModel, threshold, lite, cwd } = input;
+	const toolsDefault = input.inheritance?.toolsDefault ?? ["read", "grep", "find", "ls", "bash"];
+	const isolation = [
+		...(input.inheritance?.inheritSkills ? [] : ["--no-skills"]),
+		...(input.inheritance?.inheritProjectContext ? [] : ["--no-context-files"]),
+	];
 	const diffPath = diffFilePath(cwd);
 	const filesPath = filesListPath(cwd);
 	const kindPath = kindFilePath(cwd);
-	const runName = reviewRunName();
-	const reviewerTasks: ReviewerTask[] = reviewers.map((reviewer) => ({
-		id: reviewer.id,
-		taskName: `${runName}/${reviewer.id}`,
-		message: buildReviewerTask(reviewer.id, diffPath, filesPath, kindPath, target.userContext),
-	}));
+	const findingsPath = join(cwd, ".pi", "pi-review", "reviewer-findings.md");
+	const reviewerCommands = reviewers.map((reviewer) =>
+		spawnCommand({
+			name: `review-${reviewer.id}`,
+			tools: reviewer.tools ?? toolsDefault,
+			model: reviewer.model,
+			thinking: reviewer.thinking,
+			parentModel,
+			isolation,
+			files: [writePrompt(cwd, reviewer.id, buildReviewerTask(diffPath, filesPath, kindPath, target.userContext))],
+		}),
+	);
 	const blocks: string[] = [];
 
 	blocks.push("# Code review (token-lean)");
@@ -84,17 +127,18 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 		blocks.push("");
 	}
 	blocks.push(
-		`Review the change (${target.label}). Obtain the diff once, fan out ${reviewers.length} isolated pi-codex-subagents reviewer${reviewers.length === 1 ? "" : "s"}${lite ? " (lite)" : " and then run one gate"}, then write the report.`,
+		`Review the change (${target.label}). Obtain the diff once, fan out ${reviewers.length} isolated reviewer subagent${reviewers.length === 1 ? "" : "s"}${lite ? " (lite)" : " and then run one gate"}, then write the report.`,
 	);
 	blocks.push("");
 	blocks.push("## Hard rules (do not violate)");
 	blocks.push("");
-	blocks.push("- For reviewer orchestration, use **only** the pi-codex-subagents tools: `spawn_agent`, `wait_all_agents`, and (for a non-lite review) `wait_agent`. You may use bash yourself in Step 1 to obtain the change.");
-	blocks.push("- Spawn every reviewer **once and in parallel**: issue all reviewer `spawn_agent` calls in one assistant tool-call batch, then immediately call `wait_all_agents` for exactly those task names.");
+	blocks.push("- Orchestrate reviewers **only** with the `subagent` CLI via bash (`subagent spawn`, `subagent wait`, `subagent stop`), using the exact commands below. You may use bash yourself in Step 1 to obtain the change.");
+	blocks.push("- Spawn every reviewer **once**, all in a single bash call, before waiting on any of them. Note each handle from the `Spawned <name> (<handle>)` lines.");
 	blocks.push("- Do not retry or re-spawn a failed reviewer. Preserve it as failed in the report.");
-	blocks.push("- Do not use `spawn_agent` for obtaining the diff, verification, re-review, or report writing.");
-	blocks.push("- Pass each listed reviewer `agent_type` and `message` verbatim. The matching pi-review template supplies the reviewer role instructions. For the gate, use its listed base message and append the collected reviewer findings exactly as Step 3 specifies.");
-	blocks.push("- `spawn_agent` children inherit the parent model unless a local pi-codex-subagents template or its configured model routing overrides it. Only pass a `model` when that tool's schema offers the configured value.");
+	blocks.push("- Do not spawn subagents for obtaining the diff, verification, re-review, or report writing.");
+	blocks.push("- Each prompt file already contains the role instructions and task. Do not edit them.");
+	blocks.push("- Give every bash call that runs `subagent wait` a timeout of at least 1900 seconds.");
+	blocks.push("- Stop every subagent you spawned before writing the report, including failed ones.");
 	blocks.push("");
 	blocks.push(`**Skip these false positives:** ${FALSE_POSITIVE_GUIDANCE}.`);
 	blocks.push("");
@@ -104,6 +148,7 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 	const todoSteps = [
 		`Obtain diff + file list → ${DIFF_REL_PATH} (write only)`,
 		lite ? "Spawn and collect the lite reviewer" : `Spawn and collect ${reviewers.length} parallel reviewers, then run the gate`,
+		"Stop all review subagents",
 		"Write the report from the child final replies",
 	];
 	for (const step of todoSteps) blocks.push(`- [ ] ${step}`);
@@ -129,45 +174,43 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 
 	blocks.push("## Step 2 — Spawn and collect reviewers");
 	blocks.push("");
-	blocks.push("Make one parallel batch of `spawn_agent` calls with these exact arguments:");
-	for (const reviewer of reviewerTasks) {
-		blocks.push("");
-		blocks.push(`### ${reviewer.id}`);
-		blocks.push("```text");
-		blocks.push(`task_name: ${reviewer.taskName}`);
-		blocks.push(`agent_type: ${codexAgentType(reviewer.id)}`);
-		blocks.push("message:");
-		blocks.push(reviewer.message);
-		blocks.push("```");
-	}
-	blocks.push("");
-	blocks.push("After all spawn calls return, collect their final replies:");
-	blocks.push("```js");
-	blocks.push(`wait_all_agents({ targets: ${JSON.stringify(reviewerTasks.map((task) => task.taskName))} })`);
+	blocks.push("Run all of these in **one** bash call:");
+	blocks.push("```bash");
+	for (const command of reviewerCommands) blocks.push(command);
 	blocks.push("```");
-	blocks.push("Treat each returned final response as that reviewer's JSON. Keep failures and malformed JSON as failed reviewers; do not re-read the diff yourself.");
+	blocks.push("Then collect every reviewer in **one** bash call (they run in parallel, so sequential waits are fine). Run the commands directly — no pipes or redirects — and keep going if one fails:");
+	blocks.push("```bash");
+	blocks.push("subagent wait <handle>; subagent wait <handle>; …");
+	blocks.push("```");
+	blocks.push("Treat each `<handle> finished` reply as that reviewer's JSON. Keep errors, timeouts, and malformed JSON as failed reviewers; do not re-read the diff yourself.");
 	blocks.push("");
 
 	if (!lite) {
+		const gateCommand = spawnCommand({
+			name: "review-gate",
+			tools: ["read"],
+			model: gateModel,
+			thinking: gateThinking,
+			parentModel,
+			isolation,
+			files: [writePrompt(cwd, "gate", buildGateTask(target.label, threshold)), findingsPath],
+		});
 		blocks.push("## Step 3 — Gate the collected findings");
 		blocks.push("");
-		blocks.push("After `wait_all_agents` returns, concatenate the reviewer final replies (including a FAILED marker for failed children) and append them verbatim after `## Reviewer findings (inline)` in this gate message.");
-		blocks.push(`If the installed \`spawn_agent\` schema offers model \`${gateModel}\`, pass it on the gate spawn; otherwise omit \`model\`. ${gateThinking ? `If it also offers \`thinking\`, pass \`${gateThinking}\`.` : ""}`);
-		blocks.push("```text");
-		blocks.push(`task_name: ${runName}/gate`);
-		blocks.push(`agent_type: ${codexAgentType("gate")}`);
-		blocks.push("message:");
-		blocks.push(buildGateTask(target.label, threshold));
+		blocks.push(`Write the reviewer final replies verbatim to \`${findingsPath}\`, one \`## <reviewer id>\` section each (use \`FAILED: <error>\` for failed reviewers). Then run:`);
+		blocks.push("```bash");
+		blocks.push(gateCommand);
 		blocks.push("```");
-		blocks.push("Call `spawn_agent` once for that gate, then collect it with:");
-		blocks.push("```js");
-		blocks.push(`wait_agent({ targets: [${JSON.stringify(`${runName}/gate`)}] })`);
-		blocks.push("```");
-		blocks.push("The gate final response is JSON. If it fails or is malformed, report the reviewer findings without a gate verdict.");
+		blocks.push("Then `subagent wait <gate handle>` in its own bash call. The gate reply is JSON. If the gate fails or is malformed, report the reviewer findings without a gate verdict.");
 		blocks.push("");
 	}
 
-	blocks.push(`## Step ${lite ? "3" : "4"} — Report`);
+	blocks.push(`## Step ${lite ? "3" : "4"} — Stop subagents`);
+	blocks.push("");
+	blocks.push("Run `subagent stop <handle>` for every reviewer" + (lite ? "" : " and the gate") + " in one bash call.");
+	blocks.push("");
+
+	blocks.push(`## Step ${lite ? "4" : "5"} — Report`);
 	blocks.push("");
 	blocks.push("Use only the final replies collected above. Do not re-read the full diff. Write markdown into chat:");
 	blocks.push("");
@@ -187,7 +230,7 @@ function buildGateTask(changeLabel: string, threshold: number): string {
 		"## Assigned task",
 		`Synthesize reviewer findings for change ${changeLabel}.`,
 		`Threshold: ${threshold} (drop issues with confidence < ${threshold}).`,
-		"Reviewer findings are inlined below as JSON text (one block per reviewer). Parse each block's JSON.",
+		"Reviewer findings are in the attached reviewer-findings.md (one section per reviewer). Parse each section's JSON.",
 		"If a block fails to parse or the reviewer is FAILED, skip it and note it.",
 		"Dedupe by (file, line, category), re-score 1–10, and return surviving issues + verdict.",
 		`Skip false positives: ${FALSE_POSITIVE_GUIDANCE}.`,
@@ -195,7 +238,7 @@ function buildGateTask(changeLabel: string, threshold: number): string {
 	].join("\n");
 }
 
-function buildReviewerTask(id: string, diffPath: string, filesPath: string, kindPath: string, userContext?: string): string {
+function buildReviewerTask(diffPath: string, filesPath: string, kindPath: string, userContext?: string): string {
 	const parts = [
 		"## Assigned task",
 		`Read ${diffPath} as the change (only diff source — do not re-fetch via gh/git for the patch itself).`,

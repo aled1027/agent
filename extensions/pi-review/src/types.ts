@@ -130,7 +130,7 @@ export interface PiReviewConfig {
 	};
 	/**
 	 * Legacy budget settings retained so existing config files remain valid.
-	 * pi-codex-subagents does not apply these to foreground reviews.
+	 * pi-subagent does not apply these to foreground reviews.
 	 */
 	budgets?: {
 		turnBudget?: { maxTurns?: number; graceTurns?: number };

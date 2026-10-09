@@ -16,8 +16,7 @@ import type { PiReviewConfig, ReviewerSpec, ScorePerIssueMode } from "./types.js
  * Cheap model used by default for the gate (dedupe + re-score + verdict).
  * The gate is pure de-noise reasoning, so it defaults to a cheap tier;
  * reviewers stay on "inherit" to follow the parent session's stronger model.
- * This is requested only when pi-codex-subagents exposes it in spawn_agent's
- * allowed model schema; otherwise the gate inherits the parent model.
+ * Passed to `subagent spawn --provider/--model` for the gate.
  */
 export const DEFAULT_GATE_MODEL = "anthropic/claude-haiku-4-5";
 
