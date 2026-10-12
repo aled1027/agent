@@ -14,6 +14,8 @@ Pattern ported from the Claude code-review plugin. See [reference/](./reference/
 /review-agents
 ```
 
+Agents can start the same review with the `review` tool (`args` takes the same text as `/review`). It returns the directive as the tool result, and the agent carries it out in the same turn. Reviewer and gate subagents get an explicit `--tools` list, so they can't call it.
+
 ### `/review`
 
 **CC-aligned:** text after `/review` is **user context**. The main agent obtains the diff once into `.pi/pi-review/change.diff`; isolated `review-<id>` subagents review that file (same orchestration idea as Claude `/code-review`).
