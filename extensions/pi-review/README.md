@@ -9,7 +9,7 @@ Pattern ported from the Claude code-review plugin. See [reference/](./reference/
 ## Commands
 
 ```text
-/review [any prompt] [--lite] [--gate-model <id>]
+/review [any prompt] [--lite] [--gate-model <id>] [--repo <path>]
 /review-config
 /review-agents
 ```
@@ -51,6 +51,7 @@ The surface is intentionally minimal. Removed knobs (`--threshold` / `--reviewer
 | `--lite` | Single-agent fast mode: one reviewer, no gate. |
 | `--gate-model <id>` | Run the gate on this model (`provider/id`) for this run. |
 | `--no-spawn` | Dry run — print the directive that would be injected, and exit. |
+| `--repo <path>` | Review the git repo at `<path>` (relative to the session cwd) instead of the session cwd. The diff, prompts and reviewer subagents (`--cwd`) all use that repo. Lets you review a repo from a parent folder that isn't one. |
 
 ### Removed flags → config
 
