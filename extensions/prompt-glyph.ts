@@ -1,8 +1,7 @@
 import { CustomEditor, type ExtensionAPI, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 
-const PREFIX = "› ";
-const PREFIX_WIDTH = 2;
+const PREFIX_WIDTH = 0;
 const PADDING = 1;
 const BORDER = /^(?:─+|─* ([↑↓]) (\d+) more ─*)$/;
 const withoutAnsi = (line: string) => line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
@@ -45,12 +44,7 @@ class PromptGlyphEditor extends CustomEditor {
     return [
       "",
       blankBackgroundLine,
-      ...promptLines.map((line, index) => {
-        const marker = index === 0 && this.hiddenAbove ? "›↑" : index === promptLines.length - 1 && this.hiddenBelow ? "›↓" : PREFIX;
-        return this.lineBackground(
-          horizontalPadding + this.glyphColor(marker.slice(0, this.renderedPrefixWidth)) + line + horizontalPadding,
-        );
-      }),
+      ...promptLines.map((line) => this.lineBackground(horizontalPadding + line + horizontalPadding)),
       blankBackgroundLine,
       ...autocompleteLines.map(
         (line) => " ".repeat(PADDING + this.renderedPrefixWidth) + line + horizontalPadding,

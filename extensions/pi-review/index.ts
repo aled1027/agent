@@ -4,8 +4,9 @@
  * Pipeline: eligibility → prep → parallel reviewers → gate → report.
  * See reference/pi-review-roadmap.md and reference/v0.2-plan.md.
  */
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
+import { Type } from "typebox";
 
 import { parseReviewArgs } from "./src/cli-args.js";
 import { buildReviewDirective } from "./src/directive.js";
@@ -25,10 +26,74 @@ import {
 } from "./src/config.js";
 import type { ReviewTarget } from "./src/types.js";
 
-function parentModelId(ctx: ExtensionCommandContext): string | undefined {
+function parentModelId(ctx: ExtensionContext): string | undefined {
 	const m = ctx.model;
 	if (!m) return undefined;
 	return `${m.provider}/${m.id}`;
+}
+
+type Notify = (msg: string, level?: "info" | "warning" | "error") => void;
+type Prepared =
+	| { directive: string; input?: string; noSpawn: boolean }
+	| { message: string; level: "info" | "warning" };
+
+/** Shared by the /review command and the review tool: parse args, resolve target and reviewers, build the directive. */
+async function prepareReview(args: string, ctx: ExtensionContext, notify: Notify): Promise<Prepared> {
+	const parsed = parseReviewArgs(args);
+	const { config } = loadConfig();
+	const parentModel = parentModelId(ctx);
+
+	let target: ReviewTarget | null = null;
+	try {
+		target = await resolveReviewTarget(ctx.cwd, { input: parsed.input });
+	} catch (err) {
+		return { message: err instanceof Error ? err.message : String(err), level: "warning" };
+	}
+	if (!target) {
+		return { message: "Not in a git repo and no PR/url given — nothing to review.", level: "info" };
+	}
+
+	const eligibility = checkEligibility({
+		target,
+		hasExplicitInput: Boolean(parsed.input && extractPrRef(parsed.input)),
+		isGitRepo: true,
+		probedDiff: null,
+	});
+	if (eligibility.eligible === false) {
+		return { message: eligibility.reason, level: "info" };
+	}
+
+	const reviewers = parsed.lite ? [liteReviewer(parentModel)] : resolveReviewers(config, [], parentModel);
+	if (reviewers.length === 0) {
+		return { message: "No enabled reviewers. Edit config via /review-config.", level: "warning" };
+	}
+	const gateModel = resolveModel(parsed.gateModel ?? config.gate.model, parentModel);
+
+	// Merge CC-aligned allow rules so headless reviewers are not blocked.
+	try {
+		const perm = ensureReviewPermissions(ctx.cwd);
+		if (perm.added.length > 0) {
+			notify(`pi-review: added ${perm.added.length} permission allow rule(s) for review tools.`, "info");
+		}
+	} catch (err) {
+		notify(
+			`pi-review: could not update permissions.local.json (${err instanceof Error ? err.message : String(err)})`,
+			"warning",
+		);
+	}
+
+	const directive = buildReviewDirective({
+		target,
+		reviewers,
+		gateModel,
+		gateThinking: config.gate.thinking,
+		parentModel,
+		inheritance: config.inheritance,
+		threshold: config.gate.threshold,
+		lite: parsed.lite,
+		cwd: ctx.cwd,
+	});
+	return { directive, input: parsed.input, noSpawn: parsed.noSpawn };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -53,69 +118,15 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			try {
-				const parsed = parseReviewArgs(args);
-				const { config } = loadConfig();
-				const parentModel = parentModelId(ctx);
-
-				let target: ReviewTarget | null = null;
-				try {
-					target = await resolveReviewTarget(ctx.cwd, { input: parsed.input });
-				} catch (err) {
-					notify(err instanceof Error ? err.message : String(err), "warning");
+				const prepared = await prepareReview(args, ctx, notify);
+				if ("message" in prepared) {
+					notify(prepared.message, prepared.level);
 					return;
 				}
-				if (!target) {
-					notify("Not in a git repo and no PR/url given — nothing to review.", "info");
-					return;
-				}
-
-				const eligibility = checkEligibility({
-					target,
-					hasExplicitInput: Boolean(parsed.input && extractPrRef(parsed.input)),
-					isGitRepo: true,
-					probedDiff: null,
-				});
-				if (eligibility.eligible === false) {
-					notify(eligibility.reason, "info");
-					return;
-				}
-
-				const reviewers = parsed.lite
-					? [liteReviewer(parentModel)]
-					: resolveReviewers(config, [], parentModel);
-				if (reviewers.length === 0) {
-					notify("No enabled reviewers. Edit config via /review-config.", "warning");
-					return;
-				}
-				const gateModel = resolveModel(parsed.gateModel ?? config.gate.model, parentModel);
-
-				// Merge CC-aligned allow rules so headless reviewers are not blocked.
-				try {
-					const perm = ensureReviewPermissions(ctx.cwd);
-					if (perm.added.length > 0) {
-						notify(`pi-review: added ${perm.added.length} permission allow rule(s) for review tools.`, "info");
-					}
-				} catch (err) {
-					notify(
-						`pi-review: could not update permissions.local.json (${err instanceof Error ? err.message : String(err)})`,
-						"warning",
-					);
-				}
-
-				const directive = buildReviewDirective({
-					target,
-					reviewers,
-					gateModel,
-					gateThinking: config.gate.thinking,
-					parentModel,
-					inheritance: config.inheritance,
-					threshold: config.gate.threshold,
-					lite: parsed.lite,
-					cwd: ctx.cwd,
-				});
+				const { directive, input } = prepared;
 
 				// Dry-run: show the directive instead of injecting it.
-				if (parsed.noSpawn) {
+				if (prepared.noSpawn) {
 					pi.sendMessage({ customType: "pi-review", content: directive, display: true });
 					return;
 				}
@@ -125,7 +136,7 @@ export default function (pi: ExtensionAPI) {
 				//    does NOT trigger a turn — it just shows `/review <prompt>`.
 				pi.sendMessage({
 					customType: "pi-review",
-					content: parsed.input ? `/review ${parsed.input}` : "/review",
+					content: input ? `/review ${input}` : "/review",
 					display: true,
 				});
 				// b) Hidden directive — the main agent executes it as a user turn
@@ -139,6 +150,33 @@ export default function (pi: ExtensionAPI) {
 				const message = err instanceof Error ? err.message : String(err);
 				notify(`pi-review failed: ${message}`, "error");
 			}
+		},
+	});
+
+	pi.registerTool({
+		name: "review",
+		label: "Review",
+		description:
+			"Start a pi-review code review (same as the /review command). Returns step-by-step instructions you must then carry out: get the diff, fan out reviewer subagents, run the gate, and report findings.",
+		promptSnippet: "Run a code review of local changes or a PR (same as /review)",
+		promptGuidelines: [
+			"Use the review tool only when the user asks for a code review; full reviews are slow and costly.",
+		],
+		parameters: Type.Object({
+			args: Type.Optional(
+				Type.String({
+					description:
+						"Same as /review arguments: optional PR URL or number, review focus text, and --lite for a fast single-reviewer pass. Empty reviews local git changes.",
+				}),
+			),
+		}),
+		async execute(_id, { args }, _signal, _update, ctx) {
+			const notify: Notify = (msg, level = "info") => {
+				if (ctx.hasUI) ctx.ui.notify(msg, level);
+			};
+			const prepared = await prepareReview(args ?? "", ctx, notify);
+			if ("message" in prepared) throw new Error(prepared.message);
+			return { content: [{ type: "text", text: prepared.directive }], details: {} };
 		},
 	});
 
