@@ -85,8 +85,9 @@ function spawnCommand(opts: {
 	parentModel?: string;
 	isolation: string[];
 	files: string[];
+	cwd: string;
 }): string {
-	const parts = ["subagent spawn", "--name", q(opts.name), "--tools", q(opts.tools.join(",")), ...opts.isolation];
+	const parts = ["subagent spawn", "--name", q(opts.name), "--cwd", q(opts.cwd), "--tools", q(opts.tools.join(",")), ...opts.isolation];
 	if (opts.model && opts.model !== opts.parentModel && opts.model.includes("/")) {
 		const slash = opts.model.indexOf("/");
 		parts.push("--provider", q(opts.model.slice(0, slash)), "--model", q(opts.model.slice(slash + 1)));
@@ -115,6 +116,7 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 			thinking: reviewer.thinking,
 			parentModel,
 			isolation,
+			cwd,
 			files: [writePrompt(cwd, reviewer.id, buildReviewerTask(diffPath, filesPath, kindPath, target.userContext))],
 		}),
 	);
@@ -193,6 +195,7 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 			thinking: gateThinking,
 			parentModel,
 			isolation,
+			cwd,
 			files: [writePrompt(cwd, "gate", buildGateTask(target.label, threshold)), findingsPath],
 		});
 		blocks.push("## Step 3 — Gate the collected findings");

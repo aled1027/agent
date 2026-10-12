@@ -56,6 +56,8 @@ function appendResolveFreshBase(lines: string[]): void {
 export function buildObtainDiffScript(input: ObtainDiffScriptInput): string {
 	const { diffPath, filesPath, kindPath, metaPath, prRef } = input;
 	const lines: string[] = [];
+	// The main agent's shell may sit outside the repo (--repo), so run every git command there.
+	lines.push(`cd ${q(input.cwd)}`);
 	lines.push(`mkdir -p ${q(`${input.cwd}/.pi/pi-review`)}`);
 	lines.push(`META=${q(metaPath)}`);
 

@@ -6,6 +6,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Type } from "typebox";
 
 import { parseReviewArgs } from "./src/cli-args.js";
@@ -42,15 +43,22 @@ async function prepareReview(args: string, ctx: ExtensionContext, notify: Notify
 	const parsed = parseReviewArgs(args);
 	const { config } = loadConfig();
 	const parentModel = parentModelId(ctx);
+	const cwd = parsed.repo ? resolve(ctx.cwd, parsed.repo) : ctx.cwd;
+	if (!existsSync(cwd)) {
+		return { message: `--repo path not found: ${cwd}`, level: "warning" };
+	}
 
 	let target: ReviewTarget | null = null;
 	try {
-		target = await resolveReviewTarget(ctx.cwd, { input: parsed.input });
+		target = await resolveReviewTarget(cwd, { input: parsed.input });
 	} catch (err) {
 		return { message: err instanceof Error ? err.message : String(err), level: "warning" };
 	}
 	if (!target) {
-		return { message: "Not in a git repo and no PR/url given — nothing to review.", level: "info" };
+		return {
+			message: `${cwd} is not a git repo and no PR/url given — nothing to review. Use --repo <path> to pick a repo.`,
+			level: "info",
+		};
 	}
 
 	const eligibility = checkEligibility({
@@ -71,7 +79,7 @@ async function prepareReview(args: string, ctx: ExtensionContext, notify: Notify
 
 	// Merge CC-aligned allow rules so headless reviewers are not blocked.
 	try {
-		const perm = ensureReviewPermissions(ctx.cwd);
+		const perm = ensureReviewPermissions(cwd);
 		if (perm.added.length > 0) {
 			notify(`pi-review: added ${perm.added.length} permission allow rule(s) for review tools.`, "info");
 		}
@@ -91,7 +99,7 @@ async function prepareReview(args: string, ctx: ExtensionContext, notify: Notify
 		inheritance: config.inheritance,
 		threshold: config.gate.threshold,
 		lite: parsed.lite,
-		cwd: ctx.cwd,
+		cwd,
 	});
 	return { directive, input: parsed.input, noSpawn: parsed.noSpawn };
 }
@@ -106,6 +114,7 @@ export default function (pi: ExtensionAPI) {
 			if (last.startsWith("--")) {
 				return [
 					{ value: "--lite", label: "--lite", description: "Fast single-agent review (no gate)" },
+					{ value: "--repo", label: "--repo", description: "Review the git repo at this path" },
 					{ value: "--gate-model", label: "--gate-model", description: "Run the gate on this model (provider/id)" },
 				].filter((o) => o.value.startsWith(last));
 			}
@@ -166,7 +175,7 @@ export default function (pi: ExtensionAPI) {
 			args: Type.Optional(
 				Type.String({
 					description:
-						"Same as /review arguments: optional PR URL or number, review focus text, and --lite for a fast single-reviewer pass. Empty reviews local git changes.",
+						"Same as /review arguments: optional PR URL or number, review focus text, --lite for a fast single-reviewer pass, and --repo <path> to review a git repo other than the session cwd. Empty reviews local git changes.",
 				}),
 			),
 		}),

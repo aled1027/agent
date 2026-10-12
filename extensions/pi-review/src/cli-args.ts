@@ -4,6 +4,7 @@
  * Surface is intentionally minimal:
  *   - `--lite`      fast single-agent review (no fan-out, no gate)
  *   - `--no-spawn`  hidden dry-run (prints the resolved plan, no subprocess)
+ *   - `--repo <path>` review the git repo at <path> instead of the session cwd
  *   - trailing freeform text → user review request (focus / requirements /
  *     PR url / context), injected into reviewers and gate via target.userContext
  *     (see src/prep.ts and src/git-input.ts)
@@ -24,6 +25,8 @@ export interface ParsedReviewArgs {
 	lite: boolean;
 	/** Override the gate model for this run (otherwise config.gate.model). */
 	gateModel?: string;
+	/** Git repo to review (relative to the session cwd); defaults to the session cwd. */
+	repo?: string;
 }
 
 /** Removed valued flags — silently skip flag + value to keep input clean. */
@@ -51,6 +54,11 @@ export function parseReviewArgs(raw: string): ParsedReviewArgs {
 		}
 		if (t === "--lite") {
 			result.lite = true;
+			continue;
+		}
+		if (t === "--repo") {
+			const path = tokens[++i];
+			if (path) result.repo = path;
 			continue;
 		}
 		if (t === "--gate-model") {
