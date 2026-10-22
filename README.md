@@ -48,6 +48,21 @@ The AGENTS.md file is loaded into every pi session. Right now, I just put in non
 - `pi-review` — `/review`: parallel reviewers plus a gate, run through the `subagent` CLI
 - `subagent` — [pi-subagent](https://github.com/badlogic/pi-subagent): tmux-backed subagents via the `subagent` CLI (`bin/subagent` symlink) and `/subagent`. Not tracked in this repo. Local changes: when the parent runs in Terms, children open as background Terms child tabs under the parent's tab (`shared.ts`, `launchInTerms`), and `/subagent` selects that tab. It is committed locally in that clone; update with `git -C extensions/subagent pull --rebase`.
 
+## Pi Pocket extensions
+
+Pi Pocket does not load Pi CLI extensions from `extensions/`. Its extensions live in `pocket-extensions/`, one `.ts` file each.
+
+- `pi-review` — the `pi_review` tool: the same review as the CLI `pi-review`, but reviewers and the gate run as Pi Pocket subagents (the built-in `subagent` tool) instead of the `subagent` CLI and tmux. It reuses the CLI extension's reviewer roles (`extensions/pi-review/agents/`), diff script, and argument parser, and reads `pi-review.json`. Run files go to `/tmp/pi-review/<run>/`, not the repo. `/review` (`prompts/review.md`) calls it in Pi Pocket; in the CLI the extension's own `/review` command wins.
+- `linear` — the `linear_tools` and `linear_call` tools: Linear's MCP server (`https://mcp.linear.app/mcp`), authenticated with a Linear personal API key from `LINEAR_API_KEY` or `~/.config/linear/api-key` (not in this repo). It connects at the first call.
+
+To install on a machine with Pi Pocket:
+
+```bash
+~/.pi/agent/pocket-extensions/install.sh
+```
+
+This links each module into `~/.pi-pocket/extensions/`, and links Pi Pocket's packages into `pocket-extensions/node_modules`. Then turn each module on in Pi Pocket: Menu → Extensions. Pi Pocket does not see edits through the link: after an edit, turn the module off and on again.
+
 ## Inactive extensions
 
 - `ignore-extensions/pi-codex-subagents` — templates and run history from the replaced `@ogulcancelik/pi-codex-subagents` package
