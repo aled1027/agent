@@ -56,3 +56,6 @@ subagents/
 mcp-cache.json
 mcp-npx-cache.json
 web-search-cache/
+
+# Secrets
+mcp-auth.json
