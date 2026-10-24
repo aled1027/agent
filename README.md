@@ -53,6 +53,7 @@ The AGENTS.md file is loaded into every pi session. Right now, I just put in non
 Pi Pocket does not load Pi CLI extensions from `extensions/`. Its extensions live in `pocket-extensions/`, one `.ts` file each.
 
 - `pi-review` — the `pi_review` tool: the same review as the CLI `pi-review`, but reviewers and the gate run as Pi Pocket subagents (the built-in `subagent` tool) instead of the `subagent` CLI and tmux. It reuses the CLI extension's reviewer roles (`extensions/pi-review/agents/`), diff script, and argument parser, and reads `pi-review.json`. Run files go to `/tmp/pi-review/<run>/`, not the repo. `/review` (`prompts/review.md`) calls it in Pi Pocket; in the CLI the extension's own `/review` command wins.
+- `ponytail` — puts the Ponytail ruleset in the system prompt, as the CLI extension does. It reuses `extensions/ponytail/hooks/` and `skills/ponytail/SKILL.md`. `/ponytail-mode [off|lite|full|ultra|status|default <mode>]` sets the mode for one session (Pocket commands need a `-`, so not `/ponytail`). Saying "stop ponytail" does not turn it off here; use `/ponytail-mode off`. The `/skill:ponytail-*` skills work as they are.
 - `linear` — the `linear_tools` and `linear_call` tools: Linear's MCP server (`https://mcp.linear.app/mcp`), authenticated with a Linear personal API key from `LINEAR_API_KEY` or `~/.config/linear/api-key` (not in this repo). It connects at the first call.
 
 To install on a machine with Pi Pocket:
