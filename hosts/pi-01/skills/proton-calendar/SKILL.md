@@ -30,7 +30,10 @@ node $cal sent [query]                                # sent invites (latest ver
 - Times are wall-clock in the configured zone, America/Los_Angeles (Pacific): `YYYY-MM-DDTHH:MM`. A bare
   `YYYY-MM-DD` start makes an all-day event; `--end` is then the last day (inclusive). Default length: 1 hour.
 - Alex is always invited. `--with` adds guests by name from `people` in the config (e.g. `cat`) or by email address. Repeat it for several guests.
-- **Cat is commonly invited.** When Alex says "invite Cat", "with Cat", "add Cat", use `--with cat`. To add Cat
+- **Alex rarely invites other people, except Cat, who he invites often.** A name in the request ("pickleball with
+  Wes") usually belongs in the title, not on the guest list. Invite only Cat, or someone Alex explicitly asks to
+  invite. If unsure, ask.
+- When Alex says "invite Cat", "with Cat", "add Cat", use `--with cat`. To add Cat
   (or anyone) to an invite already sent, find it with `sent` and use `update <uid> --with cat`: it resends the
   same event with a higher sequence, so calendars update it instead of duplicating it.
 - `update` keeps fields you don't pass. It can only update invites in the sent log, not events Alex created
