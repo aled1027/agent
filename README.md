@@ -31,6 +31,11 @@ The AGENTS.md file is loaded into every pi session. Right now, I just put in non
 - `tufte` — data-dense D3 visualizations with Tufte-style principles
 - `web-browser` — browser automation via Chrome DevTools Protocol
 
+## Host-only skills
+
+`hosts/<host>/skills/` holds skills for one machine. Pi does not load them by default; that host's own
+`settings.json` adds the folder. See `hosts/pi-01/README.md`.
+
 ## Ignored skills
 
 - `make-interfaces-feel-better` — design engineering principles for polished UI details and interactions

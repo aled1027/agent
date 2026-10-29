@@ -1,0 +1,1 @@
+{ "name": "proton-calendar-skill", "private": true, "type": "module", "dependencies": { "ical.js": "2.2.1", "nodemailer": "^7.0.13" } }
