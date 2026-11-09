@@ -20,8 +20,15 @@ The attached reviewer-findings.md holds the reviewer JSON findings (one section 
 - 8: verified important (or explicit rule violation)
 - 10: certain with direct evidence
 
+## Severity
+Keep each surviving issue's severity, but raise it to `blocker` when the evidence shows it would:
+- place, size, route or cancel a real order wrongly, or move money or funds wrongly;
+- corrupt or silently falsify stored data, such as wrong amounts, costs or statuses;
+- undo a deliberate earlier fix or guard (a commit, test or comment shows it was put there on purpose);
+- delete or weaken a test that covers behavior the same change breaks.
+
 ## Verdict
-- `request_changes` if any blocker OR ≥3 major surviving
+- `request_changes` if any blocker, or any major with confidence ≥ 8, survives
 - `approve` if no blocker and no major
 - otherwise `comment`
 

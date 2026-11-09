@@ -217,7 +217,7 @@ export function buildReviewDirective(input: ReviewDirectiveInput): string {
 	blocks.push("");
 	blocks.push("Use only the final replies collected above. Do not re-read the full diff. Write markdown into chat:");
 	blocks.push("");
-	blocks.push("- **Verdict**: `request_changes` if any blocker OR ≥3 major; `approve` if no blocker and no major; otherwise `comment`.");
+	blocks.push("- **Verdict**: `request_changes` if any blocker, or any major with confidence ≥ 8; `approve` if no blocker and no major; otherwise `comment`.");
 	blocks.push("- Group findings by reviewer; format `[SEVERITY · category · conf N] file:line — evidence`.");
 	blocks.push(lite ? "- Lite mode has no gate — apply the verdict rule directly." : "- Include a short gate summary: verdict, reason, surviving issue count.");
 	blocks.push("- Cite `file:line`. Skip pre-existing issues, nitpicks, and CI/linter noise.");

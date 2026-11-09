@@ -58,7 +58,7 @@ export function filterByThreshold(issues: Issue[], threshold: number): Issue[] {
 
 /**
  * Verdict rules (same as prompts/gate.md):
- * 1. request_changes if any blocker, or ≥3 major
+ * 1. request_changes if any blocker, or any major with confidence ≥ 8
  * 2. approve if no blocker and no major
  * 3. comment otherwise (only minor/nit)
  * Empty → approve
@@ -67,7 +67,8 @@ export function computeVerdict(issues: Issue[]): Verdict {
 	if (issues.length === 0) return "approve";
 	const blockers = issues.filter((i) => i.severity === "blocker").length;
 	const majors = issues.filter((i) => i.severity === "major").length;
-	if (blockers > 0 || majors >= 3) return "request_changes";
+	const sureMajors = issues.filter((i) => i.severity === "major" && i.confidence >= 8).length;
+	if (blockers > 0 || sureMajors > 0) return "request_changes";
 	if (majors === 0) return "approve";
 	return "comment";
 }
