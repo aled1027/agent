@@ -7,6 +7,15 @@
 - If you are ever asked to use plain language, follow ISO 24495-1:2023 - Plain language.
 - Only send to, stop, or otherwise manage subagents you spawned in the current session. Other sessions' subagents belong to them; leave them alone even if the user's request seems to include them, and ask instead.
 
+## Read only what you need
+
+Every tool result stays in the conversation and is re-read on every later turn, so large output costs more than it looks.
+
+- Find, then read. Locate the lines with `rg -n`, then read just that part, with `read` and an offset and limit, or `sed -n 'a,bp'`. Read a whole file, doc or diff only when it's shorter than about 200 lines or you need all of it.
+- Read each file once per thread. Reuse what you already read.
+- Ask for results, not raw data. Use `| head`, add `LIMIT` and aggregate in SQL, or filter in codemode before returning results.
+- For diffs, start with `git diff --stat`, then read one file at a time. Skip lock and generated files.
+
 ## JPEG work
 
 For JPEG operational or data work, read `~/git/jpeg-group/jpeg-alex/docs` before choosing a workflow. Use the document that matches the task:
