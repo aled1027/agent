@@ -43,9 +43,17 @@ Duplicate when `file`, `line` (undefined = absent), and `category` match. Keep h
 
 Drop issues with re-scored `confidence < threshold`.
 
+## Severity
+
+Keep each issue's severity, but raise it to `blocker` when the evidence shows it would:
+- place, size, route or cancel a real order wrongly, or move money or funds wrongly;
+- corrupt or silently falsify stored data, such as wrong amounts, costs or statuses;
+- undo a deliberate earlier fix or guard (a commit, test or comment shows it was put there on purpose);
+- delete or weaken a test that covers behavior the same change breaks.
+
 ## Verdict rules
 
-1. `request_changes` if any `blocker` remains, **or** ≥3 `major` issues
+1. `request_changes` if any `blocker` remains, **or** any `major` with confidence ≥ 8
 2. `approve` if no `blocker` and no `major`
 3. `comment` otherwise (only `minor` / `nit`)
 
