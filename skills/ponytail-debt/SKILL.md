@@ -1,5 +1,6 @@
 ---
 name: ponytail-debt
+disable-model-invocation: true
 description: >
   List every `shortcut:` comment (and older `ponytail:` ones) as a debt ledger. One-shot report,
   changes nothing. Use for "ponytail debt", "what did ponytail defer", "list the
