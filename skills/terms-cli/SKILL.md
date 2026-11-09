@@ -1,5 +1,6 @@
 ---
 name: terms-cli
+disable-model-invocation: true
 description: Control Terms (formerly Schmuck), the native macOS tmux frontend, with the `terms` CLI. Use when asked to create, rename, or re-point Terms groups; open, close, rename, split, move, select, read, or type into Terms tabs; launch an agent in a Terms tab; list, create, or update a repository's to-dos (`docs/todos/`); or show the user a to-do or a side panel view.
 ---
 

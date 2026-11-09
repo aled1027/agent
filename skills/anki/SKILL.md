@@ -1,5 +1,6 @@
 ---
 name: anki
+disable-model-invocation: true
 description: Create, revise, or evaluate Anki cards and decks, especially language-learning cards. Use when turning material into flashcards, diagnosing difficult cards, or choosing effective prompts, answers, and note fields.
 ---
 
