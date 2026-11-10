@@ -1,0 +1,6 @@
+{
+  "fetchRouting": {
+    "providers": ["http", "jina"],
+    "allowRemoteHostedProviders": true
+  }
+}
