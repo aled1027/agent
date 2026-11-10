@@ -5,7 +5,7 @@
   "transport": "auto",
   "quietStartup": true,
   "treeFilterMode": "default",
-  "defaultProvider": "anthropic",
+  "defaultProvider": "claude-code",
   "defaultModel": "claude-opus-5-5",
   "enabledModels": [
     "openai-codex/*",
@@ -36,7 +36,7 @@
     }
   },
   "hideThinkingBlock": false,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "packages": [
     "npm:pi-web-access",
     "npm:pi-cost",
@@ -46,5 +46,6 @@
   "fullscreenWheelScrollLines": 5,
   "warnings": {
     "anthropicExtraUsage": false
-  }
+  },
+  "deviceId": "0dcf9c49-a6a8-4eae-ad2a-f0ec44c1c66f"
 }
