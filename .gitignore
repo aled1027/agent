@@ -62,3 +62,8 @@ mcp-auth.json
 
 # pi-terms runtime state (threads DB, passkeys)
 pi-terms/
+
+# Per-server pi-terms deployment settings
+pi-terms.env
+pi-terms.md
+pi-jpeg.svg
