@@ -25,6 +25,7 @@ For JPEG operational or data work, read `~/git/jpeg-group/jpeg-alex/docs` before
 - Other JPEG work: inspect the relevant documentation in that directory.
 - Google Sheets: read `How To/How to access Google Sheets with Python.md` before accessing a sheet in an agent or code.
 - If a ticket is mentioned, it's likely a Linear ticket. You can access linear using MCP.
+- Don't put Linear ticket IDs or links in code, comments, commit messages, PR titles or descriptions, or branch names.
 
 ## Guardrails
 
