@@ -16,16 +16,9 @@ Every tool result stays in the conversation and is re-read on every later turn, 
 - Ask for results, not raw data. Use `| head`, add `LIMIT` and aggregate in SQL, or filter in codemode before returning results.
 - For diffs, start with `git diff --stat`, then read one file at a time. Skip lock and generated files.
 
-## JPEG work
+## Work
 
-For JPEG operational or data work, read `<work docs>` before choosing a workflow. Use the document that matches the task:
-
-- Infrastructure, logs, restarts, or investigations: `AWS.md`, `Sentry.md`, and `How To/`.
-- Database access, schemas, orders, or algorithm parameters: `DB - *.md`.
-- Other JPEG work: inspect the relevant documentation in that directory.
-- Google Sheets: read `How To/How to access Google Sheets with Python.md` before accessing a sheet in an agent or code.
-- If a ticket is mentioned, it's likely a Linear ticket. You can access linear using MCP.
-- Don't put Linear ticket IDs or links in code, comments, commit messages, PR titles or descriptions, or branch names.
+For JPEG work, Linear tickets, or work infrastructure, read `~/.pi/agent/work.md` first. It's local only and not in git.
 
 ## Guardrails
 

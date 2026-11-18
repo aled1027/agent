@@ -67,3 +67,7 @@ pi-terms/
 pi-terms.env
 pi-terms.md
 pi-jpeg.svg
+
+# Local only: work details and crash logs
+work.md
+crashes.json
